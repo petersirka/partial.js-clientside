@@ -135,6 +135,12 @@ Framework.prototype._routeCompare = function(url, route) {
 
 Framework.prototype.location = function(url) {
 
+    var index = url.indexOf('?');
+    if (index !== -1)
+        url = url.substring(0, index);
+    
+    url = utils.path(url);
+
 	var self = this;
 	var path = self._route(url);
 	var routes = [];
@@ -320,6 +326,20 @@ Framework.prototype.validate = function(model, properties, resource, prefix) {
 	};
 	
 	return error;
+};
+
+Framework.prototype.redirect = function(url) {
+    var self = this;
+
+    if (!history.pushState) {
+        window.location.href = url;
+        return self;
+    }
+
+    history.pushState(null, null, url);
+    self.location(url);
+    
+    return self;
 };
 
 Framework.prototype.onValidation = null;
@@ -1591,6 +1611,769 @@ if (!Array.prototype.indexOf) {
         '\\': '\\\\'
     };
 })(jQuery);
+
+
+function Upload() {
+    this.events = [];
+    this.isBusy = false;
+};
+
+Upload.prototype.submit = function (url, files, data) {
+
+    var self = this;
+
+    if (self.isBusy)
+        return false;
+
+    var fd = new FormData();
+
+    for (var i = 0; i < files.length; i++)
+        fd.append('file' + (i + 1), files[i]);
+
+    if (typeof (data) !== 'undefined' && data !== null) {
+        for (var key in data)
+            fd.append(key, data[key]);
+    }
+
+    var xhr = new XMLHttpRequest();
+
+    xhr.addEventListener('load', function () {
+        self.isBusy = false;
+        self.emit('complete', this.responseText);
+    }, false);
+
+    xhr.upload.addEventListener('progress', function (evt) {
+        var percentage = 0;
+
+        if (evt.lengthComputable)
+            percentage = Math.round(evt.loaded * 100 / evt.total);
+
+        self.emit('progress', percentage, evt.transferSpeed, evt.timeRemaining);
+    }, false);
+
+    xhr.addEventListener('error', function (e) {
+        self.isBusy = false;
+        self.emit('error', e);
+    }, false);
+
+    xhr.addEventListener("abort", function () {
+        self.isBusy = false;
+        self.emit('cancel');
+    }, false);
+
+    self.isBusy = true;
+    self.emit('begin');
+
+    xhr.open('POST', url);
+    xhr.send(fd);
+
+    return true;
+};
+
+Upload.prototype.on = function (name, fn) {
+    var self = this;
+    self.events.push({ name: name, fn: fn });
+    return self;
+};
+
+Upload.prototype.emit = function () {
+    var self = this;
+    var name = arguments[0];
+
+    var arr = [];
+    for (var i = 0; i < arguments.length; i++) {
+        if (i > 0)
+            arr.push(arguments[i]);
+    };
+
+    self.events.forEach(function (o) {
+        if (o.name === name)
+            o.fn.apply(self, arr);
+    });
+
+    return self;
+};
+
+function TouchPaging(element, options) {
+
+    this.events = [];
+    this.options = $.extend({ minDifferenceX: 100, maxDifferenceY: 50 }, options);
+
+    var begX = 0;
+    var begY = 0;
+    var self = this;
+    var el = $(element);
+
+    el.bind('touchstart touchmove', function (e) {
+        var t = e.originalEvent.touches[0];
+        var x = t.pageX;
+        var y = t.pageY;
+
+        if (e.type === 'touchstart') {
+            begX = x;
+            begY = y;
+            return;
+        }
+
+        if (e.type !== 'touchmove')
+            return;
+
+        var r = false;
+
+        if (Math.abs(begX - x) > self.options.minDifferenceX && Math.abs(begY - y) < self.options.maxDifferenceY)
+            r = self.emit(begX < x ? 'prev' : 'next', begX, x);
+
+        if (r)
+            el.unbind('touchstart touchmove');
+    });
+};
+
+TouchPaging.prototype.on = function (name, fn) {
+    var self = this;
+    self.events.push({ name: name, fn: fn });
+    return self;
+};
+
+TouchPaging.prototype.emit = function () {
+    var self = this;
+    var name = arguments[0];
+
+    var arr = [];
+    for (var i = 0; i < arguments.length; i++) {
+        if (i > 0)
+            arr.push(arguments[i]);
+    };
+
+    self.events.forEach(function (o) {
+        if (o.name === name)
+            o.fn.apply(self, arr);
+    });
+
+    return self;
+};
+
+function Scroller(element, direction, mouseDisabled) {
+
+    this.events = [];
+    this.options = { begX: 0, endX: 0, begY: 0, endY: 0, begTime: 0 };
+    var el = $(element);
+
+    var self = this;
+
+    el.bind((!mouseDisabled ? 'mousedown mouseup ' : '') + 'touchstart touchmove', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var x = 0;
+        var y = 0;
+
+        if (e.type.indexOf('touch') === -1) {
+            x = e.pageX;
+            y = e.pageY;
+        } else {
+            var touch = e.originalEvent.touches[0];
+            x = touch.pageX;
+            y = touch.pageY;
+        }
+
+        if (e.type === 'mousedown' || e.type === 'touchstart') {
+            self.options.begTime = new Date().getTime();
+            self.options.begX = x;
+            self.options.begY = y;
+            self.emit('start', x, y, el);
+            return;
+        }
+
+        self.options.endX = x;
+        self.options.endY = y;
+
+        var interval = new Date().getTime() - self.options.begTime;
+        if (interval > 500)
+            interval = 500;
+
+        var obj = {};
+
+        var position = direction === 'scrollLeft' ? self.options.begX - self.options.endX : self.options.begY - self.options.endY;
+        obj[direction] = '+=' + position + 'px';
+
+        el.stop().animate(obj, interval * 2, function () {
+            self.emit('scroll', position, el);
+        });
+    });
+};
+
+Scroller.prototype.on = function (name, fn) {
+    var self = this;
+    self.events.push({ name: name, fn: fn });
+    return self;
+};
+
+Scroller.prototype.emit = function () {
+    var self = this;
+    var name = arguments[0];
+
+    var arr = [];
+    for (var i = 0; i < arguments.length; i++) {
+        if (i > 0)
+            arr.push(arguments[i]);
+    };
+
+    self.events.forEach(function (o) {
+        if (o.name === name)
+            o.fn.apply(self, arr);
+    });
+
+    return self;
+};
+
+function AutoComplete(options, url) {
+
+    if (typeof (options) === 'string')
+        options = { target: options };
+
+    this.options = $.extend({ id: 'autocomplete_' + new Date().getTime(), url: url || '', minimumChar: 3, offsetLeft: 0, offsetTop: 5, target: null, className: 'autocomplete', params: '' }, options);
+    this.datasource = [];
+    this.events = [];
+    this.cache = {};
+    this.options.target = $(this.options.target);
+
+    this.isBusy = false;
+    this.autorun = null;
+
+    this.index = -1;
+    this.isMouse = false;
+
+    this.container = $(this.options.id);
+    this.create();
+
+    this.onDraw = function (item) {
+        return '<li>' + (item.name || item.K || '') + '</li>';
+    };
+};
+
+AutoComplete.prototype.cacheWrite = function (query, data) {
+    var self = this;
+    self.cache[query] = data;
+    return self;
+};
+
+AutoComplete.prototype.cacheRead = function (query) {
+    return this.cache[query] || null;
+};
+
+AutoComplete.prototype.create = function () {
+
+    var self = this;
+
+    if (self.container.length > 0)
+        return self;
+
+    $(document.body).append('<ul id="' + self.options.id + '" class="' + self.options.className + '"></ul>');
+    self.container = $('#' + self.options.id);
+
+    $(self.options.target).bind('keyup blur keypress', function (e) {
+
+        if (e.type === 'keypress') {
+            if (self.index != -1 && (e.keyCode == 13 || e.keyCode == 38 || e.keyCode == 40))
+                e.preventDefault();
+            return;
+        }
+
+        if (e.type === 'blur') {
+            if (!self.isMouse)
+                self.hide();
+            return true;
+        }
+
+        var v = this.value;
+        if (v.length <= self.options.minimumChar) {
+            self.hide();
+            return true;
+        }
+
+        switch (e.keyCode) {
+            case 8:
+                self.search();
+                return true;
+            case 9:
+            case 17:
+            case 18:
+            case 37:
+            case 39:
+            case 224:
+                return true;
+            case 38:
+            case 40:
+            case 13:
+            case 27:
+                self.onKeypress(e);
+                return true;
+        }
+
+        self.search(this.value);
+    });
+
+    return self;
+};
+
+AutoComplete.prototype.bind = function () {
+    var self = this;
+    self.container.find('li').bind('mousemove mouseleave mouseenter click', function (e) {
+
+        if (e.type === 'mousemove' || e.type === 'mouseleave') {
+            self.isMouse = e.type === 'mousemove';
+            return;
+        }
+
+        var el = $(this);
+
+        if (e.type === 'click') {
+            self.index = el.index();
+            self.hide();
+            self.emit('select', self.datasource[self.index], self.index);
+            return;
+        }
+
+        var d = self.container.find('li');
+        d.eq(self.index).removeClass('selected');
+        self.index = el.index();
+        d.eq(self.index).addClass('selected');
+    });
+};
+
+AutoComplete.prototype.show = function () {
+    var self = this;
+    var el = self.options.target;
+    var off = el.offset();
+    self.container.css({ left: off.left + self.options.offsetLeft, top: off.top + el.height() + self.options.offsetTop }).show();
+    return self;
+};
+
+AutoComplete.prototype.hide = function () {
+    var self = this;
+    self.container.hide();
+    return self;
+};
+
+AutoComplete.prototype.onKeypress = function (e) {
+    var self = this;
+    var code = e.keyCode;
+
+    e.cancelBubble = true;
+    e.returnValue = false;
+
+    if (code !== 38 && code !== 40 && code !== 27 && code !== 13)
+        return true;
+
+    var div = self.container.find('li');
+    div.eq(self.index).toggleClass('selected', false);
+
+    switch (code) {
+        case 38:
+            if (self.index > 0)
+                self.index--;
+            break;
+        case 40:
+            if (self.datasource.length > 0 && !self.container.is(':visible'))
+                self.show();
+
+            if (self.index < self.datasource.length - 1)
+                self.index++;
+            break;
+        case 27:
+            self.container.hide();
+            return;
+        case 13:
+            if (self.container.is(':visible')) {
+                self.hide();
+                self.emit('select', self.datasource[self.index], self.index);
+            }
+            return;
+    }
+
+    div.eq(self.index).toggleClass('selected', true);
+};
+
+
+AutoComplete.prototype.search = function (q) {
+    var self = this;
+    var el = self.options.target;
+
+    if (typeof (q) === 'undefined')
+        q = el.val();
+
+    if (q.length <= self.options.minimumChar)
+        return;
+
+    var cache = self.cacheRead(q);
+
+    if (cache === null) {
+
+        if (self.autorun !== null) {
+            clearTimeout(self.autorun);
+            self.autorun = null;
+        }
+
+        self.autorun = setTimeout(function () {
+
+            if (self.isBusy)
+                return;
+
+            self.isBusy = true;
+            $.get(self.options.url + '?q=' + encodeURIComponent(q) + (self.options.params.length > 0 ? '&' + self.options.params : ''), function (d) {
+
+                self.isBusy = false;
+                self.container.empty();
+                d = utils.JtO(d);
+
+                if (d === null)
+                    d = [];
+
+                d.forEach(function (o, i) {
+                    self.container.append(self.onDraw(o, i));
+                });
+
+                self.datasource = d;
+                self.cacheWrite(q, d);
+                index = -1;
+
+                if (self.datasource.length > 0) {
+                    self.bind();
+                    self.show();
+                }
+                else
+                    self.hide();
+            });
+
+        }, 100);
+        return;
+    }
+
+    if (cache.length == 0) {
+        self.hide();
+        self.datasource = [];
+        return;
+    }
+
+    self.container.empty();
+
+    if (cache.length === 0) {
+        self.hide();
+        return;
+    }
+
+    self.datasource = [];
+    cache.forEach(function (o, i) {
+        self.datasource.push(o);
+        self.container.append(self.onDraw(o, i));
+    });
+    self.bind();
+    self.index = -1;
+    self.show();
+};
+
+AutoComplete.prototype.on = function (name, fn) {
+    var self = this;
+    self.events.push({ name: name, fn: fn });
+    return self;
+};
+
+AutoComplete.prototype.emit = function () {
+    var self = this;
+    var name = arguments[0];
+
+    var arr = [];
+    for (var i = 0; i < arguments.length; i++) {
+        if (i > 0)
+            arr.push(arguments[i]);
+    };
+
+    self.events.forEach(function (o) {
+        if (o.name === name)
+            o.fn.apply(self, arr);
+    });
+
+    return self;
+};
+
+function Calendar() {
+    this.events = [];
+    this.cache = {};
+    this.now = new Date();
+    this.selected = [];
+    this.id = "calendar" + this.now.getTime();
+    this.year = this.now.getFullYear();
+    this.month = this.now.getMonth();
+    this.monthName = ['Január', 'Február', 'Marec', 'Apríl', 'Máj', 'Jún', 'Júl', 'August', 'September', 'Október', 'November', 'December'];
+    this.firstDay = 1;
+    this.days = 0;
+    this.day = 0;
+    this.dayName = ['NE', 'PO', 'UT', 'ST', 'ŠT', 'PI', 'SO'];
+}
+
+Calendar.prototype.on = function (name, fn) {
+    var self = this;
+    self.events.push({ name: name, fn: fn });
+    return self;
+};
+
+Calendar.prototype.emit = function () {
+    var self = this;
+    var name = arguments[0];
+
+    var arr = [];
+    for (var i = 0; i < arguments.length; i++) {
+        if (i > 0)
+            arr.push(arguments[i]);
+    };
+
+    self.events.forEach(function (o) {
+        if (o.name === name)
+            o.fn.apply(self, arr);
+    });
+
+    return self;
+};
+
+Calendar.prototype.setToday = function () {
+    var self = this;
+    self.setDate(self.now.getFullYear(), self.now.getMonth(), self.now.getDate());
+    return self;
+};
+
+Calendar.prototype.setDate = function (y, m, d) {
+    var self = this;
+    var Y = y;
+    var M = m;
+    var D = d;
+
+    if (arguments.length === 0) {
+        var dd = new Date();
+        Y = dd.getFullYear();
+        M = dd.getMonth();
+        D = dd.getDate();
+    }
+
+    self.days = utils.dateDays(Y, M);
+    if (self.day > self.days)
+        self.day = self.days;
+    else
+        self.day = D;
+
+    self.year = Y;
+    self.month = M;
+
+    self.emit("change");
+    self.render();
+};
+
+Calendar.prototype.getYear = function () {
+    return this.year;
+};
+
+Calendar.prototype.getDate = function () {
+    var self = this;
+    var d = new Date(self.year, self.month, self.day);
+    return d;
+};
+
+Calendar.prototype.getDay = function () {
+    return this.day + 1;
+};
+
+Calendar.prototype.getMonth = function () {
+    return this.month + 1;
+};
+
+Calendar.prototype.isFuture = function (day) {
+    var self = this;
+
+    var y = self.now.getFullYear();
+    var m = self.now.getMonth();
+    var d = self.now.getDate();
+
+    if (y > self.year)
+        return false;
+
+    if (y < self.year)
+        return true;
+
+    if (m > self.month)
+        return false;
+
+    if (m < self.month)
+        return true;
+
+    if (d > day)
+        return false;
+
+    if (d < day)
+        return true;
+
+    return false;
+};
+
+Calendar.prototype.isToday = function (date) {
+    var self = this;
+    return self.now.getFullYear() === self.year && self.now.getMonth() === self.month && self.now.getDate() === date;
+};
+
+Calendar.prototype.isSelected = function (date) {
+    var self = this;
+
+    var month = self.month;
+    var year = self.year;
+
+    var cb = function (selected) {
+        return selected.getFullYear() === year && selected.getMonth() === month && selected.getDate() === date;
+    };
+
+    return self.selected.find(cb) !== null;
+
+};
+
+Calendar.prototype.isIn = function (dB, dE, d) {
+    var n = utils.dateDiff(dB, d);
+    if (n < 0)
+        return false;
+
+    n = utils.dateDiff(d, dE);
+    if (n < 0)
+        return false;
+
+    return true;
+}
+
+Calendar.prototype.getYear = function () {
+    return this.year;
+};
+
+Calendar.prototype.nextMonth = function () {
+    var self = this;
+
+    self.month++;
+
+    if (self.month > 11) {
+        self.month = 0;
+        self.year++;
+    }
+
+    self.setDate(self.year, self.month, self.day);
+    return self;
+};
+
+Calendar.prototype.nextYear = function () {
+    var self = this;
+    self.year++;
+    self.setDate(self.year, self.month, self.day);
+    return self;
+};
+
+Calendar.prototype.prevMonth = function () {
+    var self = this;
+    self.month--;
+
+    if (self.month < 0) {
+        self.month = 11;
+        self.year--;
+    }
+
+    self.setDate(self.year, self.month, self.day);
+    return self;
+};
+
+Calendar.prototype.prevMonthDays = function () {
+    var self = this;
+
+    var m = self.month - 1;
+    var y = self.year;
+
+    if (m === -1) {
+        m = 11;
+        y--;
+    }
+
+    return utils.dateDays(y, m);
+};
+
+Calendar.prototype.nextMonthDays = function () {
+    var self = this;
+    var m = self.month + 1;
+    var y = self.year;
+
+    if (m === 12) {
+        m = 0;
+        y++;
+    }
+
+    return utils.dateDays(y, m);
+};
+
+Calendar.prototype.prevYear = function () {
+    var self = this;
+
+    self.year--;
+    self.setDate(self.year, self.month, self.day);
+
+    return self;
+};
+
+Calendar.prototype.render = function () {
+
+    var self = this;
+    var d = new Date(self.year, self.month, 1);
+    var today = d.getDay();
+    var output = { header: [], days: [], month: self.monthName[self.month], year: self.year };
+    var firstDay = self.firstDay;
+    var firstCount = 0;
+    var from = today - self.firstDay;
+
+    if (from < 0)
+        from = 7 + from;
+
+    while (firstCount++ < 7) {
+        output.header.push({ index: firstDay, name: self.dayName[firstDay] });
+        firstDay++;
+        if (firstDay > 6)
+            firstDay = 0;
+    }
+
+    var index = 0;
+    var indexEmpty = 0;
+    var count = 0;
+    var days = self.prevMonthDays() - from;
+
+    for (var i = 0; i < self.days + from; i++) {
+
+        count++;
+        var obj = { isToday: false, isSelected: false, isEmpty: false, isFuture: false, number: 0, index: count };
+
+        if (i >= from) {
+            index++;
+            obj.number = index;
+            obj.isSelected = self.isSelected(index);
+            obj.isToday = self.isToday(index);
+            obj.isFuture = self.isFuture(index);
+        } else {
+            indexEmpty++;
+            obj.number = days + indexEmpty;
+            obj.isEmpty = true;
+        }
+
+        output.days.push(obj);
+    }
+
+    indexEmpty = 0;
+    for (var i = count; i < 42; i++) {
+        count++;
+        indexEmpty++;
+        var obj = { isToday: false, isSelected: false, isEmpty: true, isFuture: false, number: indexEmpty, index: count };
+        output.days.push(obj);
+    }
+
+    self.emit("render", output);
+    return self;
+};
 
 var framework = new Framework();
 var utils = new Utils();
