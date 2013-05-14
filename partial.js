@@ -1,81 +1,80 @@
 "use strict";
 
 function Framework() {
-	this.version = 101;
-	this.config = {};
-	this.routes = [];
-	this.events = {};
-	this.global = {};
-	this.templates = {};
-	this.repository = {};
-	this.resources = {};
-	this.locked = {};
+    this.version = 101;
+    this.config = {};
+    this.routes = [];
+    this.events = {};
+    this.global = {};
+    this.repository = {};
+    this.resources = {};
+    this.locked = {};
     this.partials = {};
-	this.url = '';
+    this.url = '';
     this.cache = new Cache(this);
     this.cache.init();
     this.resources['default'] = {};
 };
 
 Framework.prototype.on = function(name, fn) {
-	var self = this;
+    var self = this;
 
-	var e = self.events[name];
+    var e = self.events[name];
 
-	if (e) {
-		e.push(fn);
-		return self;
-	}
+    if (e) {
+        e.push(fn);
+        return self;
+    }
 
-	self.events[name] = [fn];
-	return self;
+    self.events[name] = [fn];
+    return self;
 };
 
 Framework.prototype.emit = function(name) {
 
-	var self = this;
-	var events = self.events[name] || [];
+    var self = this;
+    var events = self.events[name] || [];
 
-	if (events.length === 0)
-		return self;
+    if (events.length === 0)
+        return self;
 
-	var params = [];
-	for (var i = 1; i < arguments.length; i++)
-		params.push(arguments[i]);
+    var params = [];
+    for (var i = 1; i < arguments.length; i++)
+        params.push(arguments[i]);
 
-	events.forEach(function(fn) {
-		fn.apply(self, params);
-	});
+    events.forEach(function(fn) {
+        fn.apply(self, params);
+    });
 };
 
 Framework.prototype.route = function(url, fn, partial) {
 
-	var self = this;
-	var priority = url.count('/') + (url.indexOf('*') === -1 ? 0 : 10);
-	var route = self._route(url.trim());
-	var params = [];
+    var self = this;
+    var priority = url.count('/') + (url.indexOf('*') === -1 ? 0 : 10);
+    var route = self._route(url.trim());
+    var params = [];
 
-	if (url.indexOf('{') !== -1) {
-		route.forEach(function(o, i) {
-			if (o.substring(0, 1) === '{')
-				params.push(i);
-		});
-		priority -= params.length;
-	}
+    if (url.indexOf('{') !== -1) {
+        route.forEach(function(o, i) {
+            if (o.substring(0, 1) === '{')
+                params.push(i);
+        });
+        priority -= params.length;
+    }
 
-	self.routes.push({ url: route, fn: fn, priority: priority, params: params, partial: partial || [] });
+    self.routes.push({ url: route, fn: fn, priority: priority, params: params, partial: partial || [] });
 
-	self.routes.sort(function(a, b) {
-		if (a.priority > b.priority)
-			return -1;
+    self.routes.sort(function(a, b) {
+        if (a.priority > b.priority)
+            return -1;
 
-		if (a.priority < b.priority)
-			return 1;
+        if (a.priority < b.priority)
+            return 1;
 
-		return 0;
-	});
+        return 0;
+    });
 
-	return self;
+    return self;
 };
 
 Framework.prototype.partial = function(name, fn) {
@@ -108,60 +107,60 @@ Framework.prototype.partial = function(name, fn) {
 };
 
 Framework.prototype._route = function(url) {
-	url = url.toLowerCase();
+    url = url.toLowerCase();
 
-	if (url[0] === '/')
-		url = url.substring(1);
+    if (url[0] === '/')
+        url = url.substring(1);
 
-	if (url[url.length - 1] === '/')
-		url = url.substring(0, url.length - 1);
+    if (url[url.length - 1] === '/')
+        url = url.substring(0, url.length - 1);
 
-	var arr = url.split('/');
-	if (arr.length === 1 && arr[0] === '')
-		arr[0] = '/';
+    var arr = url.split('/');
+    if (arr.length === 1 && arr[0] === '')
+        arr[0] = '/';
 
-	return arr;
+    return arr;
 };
 
 Framework.prototype._routeParam = function(routeUrl, route) {
-	var arr = [];
+    var arr = [];
 
-	if (!route || !routeUrl)
-		return arr;
+    if (!route || !routeUrl)
+        return arr;
 
-	if (route.params.length === 0)
-		return arr;
+    if (route.params.length === 0)
+        return arr;
 
-	route.params.forEach(function(o) {
-		var value = routeUrl[o];
-		arr.push(value === '/' ? '' : value);
-	});
+    route.params.forEach(function(o) {
+        var value = routeUrl[o];
+        arr.push(value === '/' ? '' : value);
+    });
 
-	return arr;
+    return arr;
 };
 
 Framework.prototype._routeCompare = function(url, route) {
 
-	var skip = url.length === 1 && url[0] === '/';
+    var skip = url.length === 1 && url[0] === '/';
 
-	for (var i = 0; i < url.length; i++) {
+    for (var i = 0; i < url.length; i++) {
 
-		var value = route[i];
+        var value = route[i];
 
-		if (typeof(value) === 'undefined')
-			return false;
+        if (typeof(value) === 'undefined')
+            return false;
 
-		if (!skip && value[0] === '{')
-			continue;
+        if (!skip && value[0] === '{')
+            continue;
 
-		if (value === '*')
-			return true;
+        if (value === '*')
+            return true;
 
-		if (url[i] !== value)
-			return false;
-	}
+        if (url[i] !== value)
+            return false;
+    }
 
-	return true;
+    return true;
 };
 
 Framework.prototype.location = function(url) {
@@ -172,28 +171,28 @@ Framework.prototype.location = function(url) {
 
     url = utils.path(url);
 
-	var self = this;
-	var path = self._route(url);
-	var routes = [];
-	var notfound = true;
+    var self = this;
+    var path = self._route(url);
+    var routes = [];
+    var notfound = true;
 
-	for (var i = 0; i < self.routes.length; i++) {
-		var route = self.routes[i];
-		if (self._routeCompare(path, route.url)) {
-			if (route.url.indexOf('*') === -1)
-				notfound = false;
-			routes.push(route);
-		}
-	}
+    for (var i = 0; i < self.routes.length; i++) {
+        var route = self.routes[i];
+        if (self._routeCompare(path, route.url)) {
+            if (route.url.indexOf('*') === -1)
+                notfound = false;
+            routes.push(route);
+        }
+    }
 
     var isError = false;
 
-	self.url = url;
-	self.repository = {};
-	utils.params = null;
-	self.emit('location', url);
+    self.url = url;
+    self.repository = {};
+    utils.params = null;
+    self.emit('location', url);
 
-	routes.forEach(function(route) {
+    routes.forEach(function(route) {
 
         try
         {
@@ -210,18 +209,18 @@ Framework.prototype.location = function(url) {
 
         try
         {
-			route.fn.apply(self, self._routeParam(path, route));
-		} catch (ex) {
+            route.fn.apply(self, self._routeParam(path, route));
+        } catch (ex) {
             isError = true;
-			self.emit('error', ex, url, 'execute - route');
-		}
-	});
+            self.emit('error', ex, url, 'execute - route');
+        }
+    });
 
     if (isError)
         self.status(500);
 
-	if (notfound)
-		self.status(404);
+    if (notfound)
+        self.status(404);
 };
 
 Framework.prototype.status = function(code) {
@@ -230,159 +229,153 @@ Framework.prototype.status = function(code) {
     return self;
 };
 
-Framework.prototype.template = function(name, model) {
-	if (name.indexOf('{') !== -1)
-		return name.params(model);
-	return (this.templates[name] || '').params(model)
-};
-
 Framework.prototype.resource = function(name, key) {
 
-	if (typeof(key) === 'undefined') {
-		key = name;
-		name = 'default';
-	}
+    if (typeof(key) === 'undefined') {
+        key = name;
+        name = 'default';
+    }
 
-	var resource = this.resources[name] || {};
-	return resource[key] || '';
+    var resource = this.resources[name] || {};
+    return resource[key] || '';
 };
 
 Framework.prototype.post = function(url, data, cb, key, expire) {
 
-	var self = this;
+    var self = this;
 
-	if (self.locked[url])
-		return false;
+    if (self.locked[url])
+        return false;
 
-	var isCache = (typeof(key) !== 'undefined');
+    var isCache = (typeof(key) !== 'undefined');
 
-	var post = (function() {
+    var post = (function() {
 
-		self.locked[url] = true;
-		self.emit('post', true, url);
+        self.locked[url] = true;
+        self.emit('post', true, url);
 
-		$.post(url, data, function(d) {
+        $.post(url, data, function(d) {
 
-			delete self.locked[url];
-			self.emit('post', false, url, d);
+            delete self.locked[url];
+            self.emit('post', false, url, d);
 
-			if (isCache)
-				self.cache.write(key, d, new Date().add('m', expire || 10));
+            if (isCache)
+                self.cache.write(key, d, new Date().add('m', expire || 10));
 
-			cb(d);
-		});
-	});
+            cb(d);
+        });
+    });
 
-	if (!isCache) {
-		post();
-		return true;
-	}
+    if (!isCache) {
+        post();
+        return true;
+    }
 
-	var d = self.cache.read(key);
-	if (d === null)
-		post();
-	else
-		cb(d);
+    var d = self.cache.read(key);
+    if (d === null)
+        post();
+    else
+        cb(d);
 
-	return true;
+    return true;
 };
 
 Framework.prototype.get = function(url, cb, key, expire) {
 
-	var self = this;
+    var self = this;
 
-	if (self.locked[url])
-		return false;
+    if (self.locked[url])
+        return false;
 
-	var isCache = (typeof(key) !== 'undefined');
-	var get = (function() {
+    var isCache = (typeof(key) !== 'undefined');
+    var get = (function() {
 
-		self.locked[url] = true;
-		self.emit('get', true, url);
+        self.locked[url] = true;
+        self.emit('get', true, url);
 
-		$.get(url, function(d) {
+        $.get(url, function(d) {
 
-			delete self.locked[url];
-			self.emit('get', false, url, d);
+            delete self.locked[url];
+            self.emit('get', false, url, d);
 
-			if (isCache)
-				self.cache.write(key, d, new Date().add('m', expire || 10));
+            if (isCache)
+                self.cache.write(key, d, new Date().add('m', expire || 10));
 
-			cb(d);
-		});
-	});
+            cb(d);
+        });
+    });
 
-	if (!isCache) {
-		get();
-		return self;
-	}
+    if (!isCache) {
+        get();
+        return self;
+    }
 
-	var d = self.cache.read(key);
-	if (d === null)
-		get();
-	else
-		cb(d);
+    var d = self.cache.read(key);
+    if (d === null)
+        get();
+    else
+        cb(d);
 
-	return self;
+    return self;
 };
 
 /*
-	Validate
-	@model {Object} :: object to validate
-	@properties {String array} : what properties?
-	@prepare {Function} : return utils.isValid() OR {Boolean} :: true is valid
-	@resource {Function} :: function(key) return {String}
-	return {ErrorBuilder}
+    Validate
+    @model {Object} :: object to validate
+    @properties {String array} : what properties?
+    @prepare {Function} : return utils.isValid() OR {Boolean} :: true is valid
+    @resource {Function} :: function(key) return {String}
+    return {ErrorBuilder}
 */
 Framework.prototype.validate = function(model, properties, resource, prefix) {
 
-	var error = [];
-	var self = this;
+    var error = [];
+    var self = this;
 
-	var prepare = function(name, value) {
-		return self.onValidation.call(self, name, value);
-	};
+    var prepare = function(name, value) {
+        return self.onValidation.call(self, name, value);
+    };
 
-	if (typeof(properties) === 'string')
-		properties = properties.replace(/\s/g, '').split(',');
+    if (typeof(properties) === 'string')
+        properties = properties.replace(/\s/g, '').split(',');
 
-	if (typeof(model) === 'undefined' || model === null)
-		model = {};
+    if (typeof(model) === 'undefined' || model === null)
+        model = {};
 
-	for (var i = 0; i < properties.length; i++) {
+    for (var i = 0; i < properties.length; i++) {
 
-		var type = typeof(value);
-		var name = properties[i].toString();
-		var value = (type === 'function' ? model[name]() : model[name]) || '';
+        var type = typeof(value);
+        var name = properties[i].toString();
+        var value = (type === 'function' ? model[name]() : model[name]) || '';
 
-		if (type === 'object') {
-			self.validate(value, properties, resource, prefix).forEach(function(err) {
-				error.push(err);
-			});
-			continue;
-		};
+        if (type === 'object') {
+            self.validate(value, properties, resource, prefix).forEach(function(err) {
+                error.push(err);
+            });
+            continue;
+        };
 
-		var result = prepare(name, value);
+        var result = prepare(name, value);
 
-		if (typeof(result) === 'undefined')
-			continue;
+        if (typeof(result) === 'undefined')
+            continue;
 
-		type = typeof(result);
+        type = typeof(result);
 
-		if (type === 'string') {
-			error.push({ name: name, error: result });
-			continue;
-		}
+        if (type === 'string') {
+            error.push({ name: name, error: result });
+            continue;
+        }
 
-		if (type === 'boolean') {
-			if (!result)
-				error.push({ name: name, error: self.resource(resource || 'default', (prefix || '') + name) });
+        if (type === 'boolean') {
+            if (!result)
+                error.push({ name: name, error: self.resource(resource || 'default', (prefix || '') + name) });
 
-			continue;
-		}
-	};
+            continue;
+        }
+    };
 
-	return error;
+    return error;
 };
 
 Framework.prototype.redirect = function(url) {
@@ -397,6 +390,22 @@ Framework.prototype.redirect = function(url) {
     self.location(url);
 
     return self;
+};
+
+Framework.prototype.template = function(template, model, repository) {
+    var self = this;
+
+    if (template.indexOf('{') === -1) {
+        var el = $(template);
+        var tag = el.get(0).tagName.toLowerCase();
+        if (tag === 'input')
+            template = el.val();
+        else
+            template = el.html();
+    }
+
+    var parser = new Template(self.cache, template, model, repository);
+    return parser.render();
 };
 
 Framework.prototype.onValidation = null;
@@ -572,13 +581,286 @@ Cache.prototype.removeAll = function(search) {
     return count;
 };
 
+/*
+    Template class
+    @controller {Controller}
+    @model {Object}
+    @repository {Object}
+    return {Template}
+*/
+function Template(cache, template, model, repository) {
+
+    this.template = template;
+    this.model = model;
+    this.repository = repository || null;
+    this.cache = cache;
+
+    if (typeof(model) === 'undefined')
+        model = '';
+
+    if (model !== null && !(model instanceof Array))
+        this.model = [model];
+};
+
+/*
+    Parse HTML
+    @html {String}
+    @isRepository {Boolean}
+    return {Object}
+*/
+Template.prototype.parse = function(html, isRepository) {
+
+    var self = this;
+    var indexBeg = html.indexOf('<!--');
+    var indexEnd = html.lastIndexOf('-->');
+
+    var beg = '';
+    var end = '';
+    var template = html.trim();
+
+    if (indexBeg !== -1 && indexEnd !== -1) {
+        beg = html.substring(0, indexBeg).trim();
+        end = html.substring(indexEnd + 3).trim();
+        template = html.substring(indexBeg + 4, indexEnd).trim();
+    }
+
+    var indexBeg = 0;
+    var indexer = 0;
+    var index = 0;
+
+    var builder = [];
+    var property = [];
+    var keys = {};
+
+    var tmp = template.match(/\{[^}\n]*\}/g);
+
+    if (tmp === null)
+        tmp = [];
+
+    for (var i = 0; i < tmp.length; i++) {
+
+        var format = '';
+        var name = tmp[i];
+        var isEncode = true;
+
+        index = name.indexOf('|');
+        indexEnd = template.indexOf(name, indexBeg);
+
+        var b = template.substring(indexBeg, indexEnd);
+        builder.push(b);
+
+        indexBeg = indexEnd + name.length;
+
+        if (index !== -1) {
+
+            format = name.substring(index + 1, name.length - 1).trim();
+            name = name.substring(1, index);
+
+            // format number
+            if (format.indexOf('#') !== -1) {
+                format = ".format('" + format + "')";
+            } else {
+                var condition = parseCondition(format);
+                if (condition.length === 0) {
+                    var count = utils.parseInt(format);
+                    if (count === 0) {
+                        format = ".format('" + format + "')";
+                    } else
+                        format = ".maxLength(" + (count) + ",'...')";
+                } else
+                    format = ".condition(" + condition + ")";
+            }
+        }
+        else
+            name = name.substring(1, name.length - 1);
+
+        if (name[0] === '!') {
+            name = name.substring(1);
+            isEncode = false;
+        }
+
+        name = name.trim();
+
+        if (isEncode)
+            format += '.toString().htmlEncode()';
+
+        var key = name + format;
+        var indexer = keys[key];
+
+        if (typeof(indexer) === 'undefined') {
+            property.push(name.trim());
+            indexer = property.length - 1;
+            keys[key] = indexer;
+        }
+
+        builder.push('prop[' + indexer + ']' + format);
+    }
+
+    if (indexBeg !== template.length)
+        builder.push(template.substring(indexBeg));
+
+    var fn = [];
+    for (var i = 0; i < builder.length; i++) {
+
+        var str = builder[i];
+
+        if (i % 2 !== 0)
+            fn.push(str);
+        else
+            fn.push("'" + str.replace(/\'/g, "\'").replace(/\n/g, '\\n') + "'");
+    }
+
+    var repositoryBeg = null;
+    var repositoryEnd = null;
+
+    if (!isRepository && self.repository !== null) {
+        repositoryBeg = beg.indexOf('{') !== -1 ? self.parse(beg, true) : null;
+        repositoryEnd = end.indexOf('{') !== -1 ? self.parse(end, true) : null;
+    }
+
+    try
+    {
+        return { generator: eval('(function(prop){return ' + fn.join('+') + ';})'), beg: beg, end: end, property: property, repositoryBeg: repositoryBeg, repositoryEnd: repositoryEnd };
+    } catch (ex) {
+        self.controller.app.error(ex, 'Template compiler', self.controller.req.uri);
+    }
+};
+
+function parseCondition(value) {
+
+    value = value.trim();
+
+    var condition = value[0];
+    if (condition !== '"' && condition !== '\'')
+        return '';
+
+    var index = value.indexOf(condition, 1);
+    if (index === -1)
+        return '';
+
+    var a = value.substring(1, index).replace(/\'/g, "\\'");
+    index = value.indexOf(condition, index + 2);
+
+    if (index === -1)
+        return "'{0}'".format(a);
+
+    return "'{0}','{1}'".format(a, value.substring(index + 1, value.length - 1).replace(/\'/g, "\\'"));
+};
+
+Template.prototype.load = function() {
+
+    var self = this;
+    var id = self.template.hash();
+
+    var generator = self.cache.read('template.' + id);
+    if (generator !== null)
+        return generator;
+
+    generator = self.parse(self.template);
+    self.cache.write('template.' + id, generator, new Date().add('m', 5));
+    return generator;
+};
+
+/*
+    Render HTML
+    @name {String}
+    return {String}
+*/
+Template.prototype.render = function() {
+
+    var self = this;
+    var generator = self.load();
+
+    if (generator === null)
+        return '';
+
+    var mid = template_compile(generator, self.model, true);
+    var beg = generator.repositoryBeg !== null ? template_compile(generator.repositoryBeg, self.repository) : generator.beg;
+    var end = generator.repositoryEnd !== null ? template_compile(generator.repositoryEnd, self.repository) : generator.end;
+
+    if (name !== 'comments')
+        return beg + mid + end;
+
+    return beg + mid + end;
+};
+
+/*
+    Eval parsed code
+    @generator {Object}
+    @obj {Array}
+    @plain {Boolean} :: internal property
+    return {String}
+*/
+function template_compile(generator, obj, plain) {
+
+    var html = '';
+
+    if (plain) {
+
+        if (!(obj instanceof Array))
+            obj = [obj];
+
+        for (var j = 0; j < obj.length; j++)
+            html += template_compile_eval(generator, obj[j], j);
+
+    } else
+        html = template_compile_eval(generator, obj, 0);
+
+    return plain ? html : generator.beg + html + generator.end;
+};
+
+/*
+    Eval parsed code
+    @generator {Object}
+    @model {Object}
+    return {String}
+*/
+function template_compile_eval(generator, model, indexer) {
+
+    var params = [];
+    for (var i = 0; i < generator.property.length; i++) {
+
+        var property = generator.property[i];
+        var val;
+
+        if (property !== '') {
+
+            if (property.indexOf('.') !== -1) {
+                var arr = property.split('.');
+                if (arr.length === 2)
+                    val = model[arr[0]][arr[1]];
+                else if (arr.length === 3)
+                    val = model[arr[0]][arr[1]][arr[3]];
+                else if (arr.length === 4)
+                    val = model[arr[0]][arr[1]][arr[3]][arr[4]];
+                else if (arr.length === 5)
+                    val = model[arr[0]][arr[1]][arr[3]][arr[4]][arr[5]];
+            } else if (property === '#')
+                val = indexer;
+            else
+                val = model[property];
+        } else
+            val = model;
+
+        if (typeof(val) === 'function')
+            val = val(i);
+
+        if (typeof(val) === 'undefined' || val === null)
+            val = '';
+
+        params.push(val);
+    }
+
+    return generator.generator.call(null, params);
+}
+
 function Utils() {
-	this.params = null;
+    this.params = null;
 };
 
 Utils.prototype.GUID = function(max) {
 
-	max = max || 40;
+    max = max || 40;
 
     var rnd = function () {
         return Math.floor(Math.random() * 65536).toString(16);
@@ -586,21 +868,21 @@ Utils.prototype.GUID = function(max) {
 
     var str = '';
     for (var i = 0; i < (max / 4) + 1; i++)
-    	str += rnd();
+        str += rnd();
 
     return str.substring(0, max);
 };
 
 Utils.prototype.keys = function(obj) {
-  	if (typeof(Object.keys) !== 'undefined')
-		return Object.keys(obj);
+    if (typeof(Object.keys) !== 'undefined')
+        return Object.keys(obj);
 
-  	var arr = [];
+    var arr = [];
 
-	for (var m in obj)
-		arr.push(m);
+    for (var m in obj)
+        arr.push(m);
 
-	return arr;
+    return arr;
 };
 
 Utils.prototype.get = function (n) {
@@ -874,165 +1156,198 @@ Utils.prototype.pluralize = function (i, a, b, c) {
 };
 
 /*
-	Async class
+    parseInt
+    @obj {Object}
+    @def {Number}
+    return {Number}
+*/
+Utils.prototype.parseInt = function(obj, def) {
+    var type = typeof(obj);
+
+    if (type === 'undefined')
+        return def || 0;
+
+    var str = type !== 'string' ? obj.toString() : obj;
+    return str.parseInt(def);
+};
+
+/*
+    parseFloat
+    @obj {Object}
+    @def {Number}
+    return {Number}
+*/
+Utils.prototype.parseFloat = function(obj, def) {
+    var type = typeof(obj);
+
+    if (type === 'undefined')
+        return def || 0;
+
+    var str = type !== 'string' ? obj.toString() : obj;
+    return str.parseFloat(def);
+};
+
+
+/*
+    Async class
 */
 function Async() {
-	this.onComplete = null;
-	this.count = 0;
-	this.pending = {};
-	this.waiting = {};
-	this.isRunning = false;
-	this.events = {};
+    this.onComplete = null;
+    this.count = 0;
+    this.pending = {};
+    this.waiting = {};
+    this.isRunning = false;
+    this.events = {};
 };
 
 Async.prototype.on = function(name, fn) {
-	var self = this;
+    var self = this;
 
-	var e = self.events[name];
+    var e = self.events[name];
 
-	if (e) {
-		e.push(fn);
-		return self;
-	}
+    if (e) {
+        e.push(fn);
+        return self;
+    }
 
-	self.events[name] = [fn];
-	return self;
+    self.events[name] = [fn];
+    return self;
 };
 
 Async.prototype.emit = function(name) {
 
-	var self = this;
-	var events = self.events[name] || [];
+    var self = this;
+    var events = self.events[name] || [];
 
-	if (events.length === 0)
-		return self;
+    if (events.length === 0)
+        return self;
 
-	var params = [];
-	for (var i = 1; i < arguments.length; i++)
-		params.push(arguments[i]);
+    var params = [];
+    for (var i = 1; i < arguments.length; i++)
+        params.push(arguments[i]);
 
-	events.forEach(function(fn) {
-		fn.apply(self, params);
-	});
+    events.forEach(function(fn) {
+        fn.apply(self, params);
+    });
 };
 
 /*
-	Internal function
-	@name {String}
-	@waiting {Boolean}
-	return {Async}
+    Internal function
+    @name {String}
+    @waiting {Boolean}
+    return {Async}
 */
 Async.prototype._complete = function(name, waiting) {
-	var self = this;
+    var self = this;
 
-	if (!waiting) {
+    if (!waiting) {
 
-		if (typeof(self.pending[name]) === 'undefined')
-			return self;
+        if (typeof(self.pending[name]) === 'undefined')
+            return self;
 
-		delete self.pending[name];
-	}
+        delete self.pending[name];
+    }
 
-	if (self.count > 0)
-		self.count--;
+    if (self.count > 0)
+        self.count--;
 
-	self.emit('end', name);
+    self.emit('end', name);
 
-	if (self.count === 0) {
-		self.onComplete && self.onComplete();
-		self.emit('complete');
-	}
+    if (self.count === 0) {
+        self.onComplete && self.onComplete();
+        self.emit('complete');
+    }
 
-	if (typeof(self.waiting[name]) !== 'undefined') {
+    if (typeof(self.waiting[name]) !== 'undefined') {
 
-		var fn = self.waiting[name];
-		delete self.waiting[name];
+        var fn = self.waiting[name];
+        delete self.waiting[name];
 
-		fn.forEach(function(f) {
-			f();
-		});
-	}
+        fn.forEach(function(f) {
+            f();
+        });
+    }
 
-	return self;
+    return self;
 };
 
 /*
-	Add function to async list
-	@name {String}
-	@fn {Function}
-	return {Async}
+    Add function to async list
+    @name {String}
+    @fn {Function}
+    return {Async}
 */
 Async.prototype.await = function(name, fn) {
-	var self = this;
-	self.count++;
+    var self = this;
+    self.count++;
 
-	if (typeof(name) === 'function') {
-		fn = name;
-		name = utils.GUID(10);
-	}
+    if (typeof(name) === 'function') {
+        fn = name;
+        name = utils.GUID(10);
+    }
 
-	self.pending[name] = function() {
-		fn(function() {
-			self._complete(name);
-		});
-	};
+    self.pending[name] = function() {
+        fn(function() {
+            self._complete(name);
+        });
+    };
 
-	if (self.isRunning)
-		self.pending[name]();
+    if (self.isRunning)
+        self.pending[name]();
 
-	return self;
+    return self;
 };
 
 /*
-	Add function to async wait list
-	@name {String}
-	@waitingFor {String} :: name of async function
-	@fn {Function}
-	return {Async}
+    Add function to async wait list
+    @name {String}
+    @waitingFor {String} :: name of async function
+    @fn {Function}
+    return {Async}
 */
 Async.prototype.wait = function(name, waitingFor, fn) {
 
-	var self = this;
-	self.count++;
+    var self = this;
+    self.count++;
 
-	if (typeof(waitingFor) === 'function') {
-		fn = waitingFor;
-		waitingFor = name;
-		name = utils.GUID(5);
-	}
+    if (typeof(waitingFor) === 'function') {
+        fn = waitingFor;
+        waitingFor = name;
+        name = utils.GUID(5);
+    }
 
-	if (typeof(self.waiting[waitingFor]) === 'undefined')
-		self.waiting[waitingFor] = [];
+    if (typeof(self.waiting[waitingFor]) === 'undefined')
+        self.waiting[waitingFor] = [];
 
-	var run = function() {
-		self.emit('begin', name);
+    var run = function() {
+        self.emit('begin', name);
 
-		fn(function() {
-			self._complete(name, true);
-		});
-	};
+        fn(function() {
+            self._complete(name, true);
+        });
+    };
 
-	self.waiting[waitingFor].push(run);
-	return self;
+    self.waiting[waitingFor].push(run);
+    return self;
 };
 
 /*
-	Run async functions
-	@fn {Function} :: callback
-	return {Async}
+    Run async functions
+    @fn {Function} :: callback
+    return {Async}
 */
 Async.prototype.complete = function(fn) {
 
-	var self = this;
-	self.onComplete = fn;
-	self.isRunning = true;
+    var self = this;
+    self.onComplete = fn;
+    self.isRunning = true;
 
-	utils.keys(self.pending).forEach(function(name) {
-		self.emit('begin', name);
-		self.pending[name]();
-	});
+    utils.keys(self.pending).forEach(function(name) {
+        self.emit('begin', name);
+        self.pending[name]();
+    });
 
-	return self;
+    return self;
 };
 
 // ========================================================================
@@ -1149,9 +1464,9 @@ String.prototype.trim = function () {
 };
 
 /*
-	Count text in string
-	@text {String}
-	return {Number}
+    Count text in string
+    @text {String}
+    return {Number}
 */
 String.prototype.count = function(text) {
     var index = 0;
@@ -1186,6 +1501,11 @@ String.prototype.htmlEncode = function () {
 
 String.prototype.htmlDecode = function () {
     return this.replace(/&gt;/g, '>').replace(/\&lt;/g, '<').replace(/\&quot;/g, '"');
+};
+
+String.prototype.hash = function() {
+    var s = this.toString();
+    return s.split("").reduce(function(a,b){a=((a<<5)-a)+b.charCodeAt(0);return a&a},0);
 };
 
 /*
@@ -1351,34 +1671,34 @@ String.prototype.padRight = function (max, c) {
 };
 
 /*
-	isNumber?
-	@isDecimal {Boolean} :: optional, default false
-	return {Boolean}
+    isNumber?
+    @isDecimal {Boolean} :: optional, default false
+    return {Boolean}
 */
 String.prototype.isNumber = function(isDecimal) {
 
-	var self = this.toString();
+    var self = this.toString();
 
-	if (self.length === 0)
-		return false;
+    if (self.length === 0)
+        return false;
 
-	isDecimal = isDecimal || false;
+    isDecimal = isDecimal || false;
 
-	for (var i = 0; i < self.length; i++) {
-		var ascii = self.charCodeAt(i);
+    for (var i = 0; i < self.length; i++) {
+        var ascii = self.charCodeAt(i);
 
-		if (isDecimal) {
-			if (ascii === 44 || ascii == 46) {
-				isDecimal = false;
-				continue;
-			}
-		}
+        if (isDecimal) {
+            if (ascii === 44 || ascii == 46) {
+                isDecimal = false;
+                continue;
+            }
+        }
 
-		if (ascii < 48 || ascii > 57)
-			return false;
-	}
+        if (ascii < 48 || ascii > 57)
+            return false;
+    }
 
-	return true;
+    return true;
 };
 
 /*
@@ -1506,6 +1826,14 @@ Number.prototype.format = function (format) {
     }
 
     return this.format(output);
+};
+
+Number.prototype.condition = function(ifTrue, ifFalse) {
+    return (this % 2 === 0 ? ifTrue : ifFalse) || '';
+};
+
+Boolean.prototype.condition = function(ifTrue, ifFalse) {
+    return (this ? ifTrue : ifFalse) || '';
 };
 
 /*
