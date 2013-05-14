@@ -2,12 +2,17 @@
 
 var LIMIT_HISTORY = 100;
 
+var _escapeable = /["\\\x00-\x1f\x7f-\x9f]/g;
+var _meta = {'\b': '\\b', '\t': '\\t', '\n': '\\n', '\f': '\\f', '\r': '\\r', '"': '\\"', '\\': '\\\\' };
+var _selector = { '#': 'getElementById', '.': 'getElementsByClassName', '@': 'getElementsByName', '=': 'getElementsByTagName', '*': 'querySelectorAll' };
+
 function Framework() {
     this.version = 101;
     this.config = {};
     this.routes = [];
     this.events = {};
     this.global = {};
+    this.params = {};
     this.repository = {};
     this.resources = {};
     this.locked = {};
@@ -17,7 +22,7 @@ function Framework() {
     this.cache.init();
     this.resources['default'] = {};
     this.debug = true;
-    this.isRefreshed = false;    
+    this.isRefreshed = false;
     this.history = [];
     this.model = null;
 };
@@ -195,7 +200,7 @@ Framework.prototype.location = function(url, isRefresh) {
             if (self.history.length > LIMIT_HISTORY)
                 self.history.shift();
         }
-    }    
+    }
 
     for (var i = 0; i < self.routes.length; i++) {
         var route = self.routes[i];
@@ -210,15 +215,15 @@ Framework.prototype.location = function(url, isRefresh) {
 
     self.url = url;
     self.repository = {};
-    utils.params = null;
-    self.emit('location', url);
+    self._params();
 
+    self.emit('location', url);
     routes.forEach(function(route) {
 
         try
         {
-            route.partial.forEach(function(o) {
-                var partial = self.partial[o];
+            route.partial.forEach(function(name) {
+                var partial = self.partials[name];
                 if (typeof(partial) === 'undefined')
                     return;
                 partial.call(self, self.url);
@@ -246,7 +251,7 @@ Framework.prototype.location = function(url, isRefresh) {
 
 Framework.prototype.back = function() {
     var self = this;
-    var url = self.history.pop() || '/'; 
+    var url = self.history.pop() || '/';
     self.url = '';
     self.redirect(url, true);
 };
@@ -282,16 +287,39 @@ Framework.prototype.post = function(url, data, cb, key, expire) {
         self.locked[url] = true;
         self.emit('post', true, url);
 
-        $.post(url, data, function(d) {
+        var xhr = new XMLHttpRequest();
+
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        xhr.onreadystatechange = function() {
+
+            if (xhr.readyState !== 4)
+                return;
 
             delete self.locked[url];
+
+            if (xhr.status > 399) {
+                self.emit('error', new Error(xhr.status + ': ' + xhr.statusText), url, 'post');
+                return;
+            }
+
+            var d = xhr.responseText;
+
+            if (d.isJSON())
+                d = d.parseJSON();
+
             self.emit('post', false, url, d);
 
             if (isCache)
                 self.cache.write(key, d, new Date().add('m', expire || 10));
 
+            xhr = null;
             cb(d);
-        });
+        };
+
+        xhr.send(serializeForm(data));
     });
 
     if (!isCache) {
@@ -321,16 +349,38 @@ Framework.prototype.get = function(url, cb, key, expire) {
         self.locked[url] = true;
         self.emit('get', true, url);
 
-        $.get(url, function(d) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        xhr.onreadystatechange = function() {
+
+            if (xhr.readyState !== 4)
+                return;
 
             delete self.locked[url];
+
+            if (xhr.status > 399) {
+                self.emit('error', new Error(xhr.status + ': ' + xhr.statusText), url, 'get');
+                return;
+            }
+
+            var d = xhr.responseText;
+
+            if (d.isJSON())
+                d = d.parseJSON();
+
             self.emit('get', false, url, d);
 
             if (isCache)
                 self.cache.write(key, d, new Date().add('m', expire || 10));
 
+            xhr = null;
             cb(d);
-        });
+        };
+
+        xhr.send();
+
     });
 
     if (!isCache) {
@@ -425,15 +475,22 @@ Framework.prototype.template = function(template, model, repository) {
     var self = this;
 
     if (template.indexOf('{') === -1) {
-        var el = $(template);
-        var tag = el.get(0).tagName.toLowerCase();
-        if (tag === 'input')
-            template = el.val();
-        else
-            template = el.html();
+        var el = DOM_selector(template);
+
+        if (el !== null) {
+
+            if (el.length > 0)
+                el = el[0];
+
+            var tag = el.tagName.toLowerCase();
+            if (tag === 'input')
+                template = el.value || '';
+            else
+                template = el.innerHTML || '';
+        }
     }
 
-    var parser = new Template(self.cache, template, model, repository);
+    var parser = new Template(self, template, model, repository);
     return parser.render();
 };
 
@@ -468,6 +525,36 @@ Framework.prototype.cookie = {
     remove: function (name) {
         this.write(name, '', -1);
     }
+};
+
+Framework.prototype._params = function() {
+
+    var self = this;
+    var data = {};
+
+    var params = window.location.href.slice(window.location.href.indexOf('?') + 1).split('&');
+
+    for (var i = 0; i < params.length; i++) {
+
+        var param = params[i].split('=');
+        if (param.length !== 2)
+            continue;
+
+        var name = decodeURIComponent(param[0]);
+        var value = decodeURIComponent(param[1]);
+        var isArray = data[name] instanceof Array;
+
+        if (typeof(data[name]) !== 'undefined' && !isArray)
+            data[name] = [data[name]];
+
+        if (isArray)
+            data[name].push(value);
+        else
+            data[name] = value;
+    }
+
+    self.params = data;
+    return self;
 };
 
 function CacheItem(id, expire, value) {
@@ -510,7 +597,7 @@ Cache.prototype.recycle = function() {
 
     var self = this;
     var repository = self.repository;
-    var keys = Object.keys(repository);
+    var keys = utils.keys(repository);
 
     if (keys.length === 0) {
         self.framework.emit('service', self.count++);
@@ -599,7 +686,7 @@ Cache.prototype.removeAll = function(search) {
     var self = this;
     var count = 0;
 
-    Object.keys(self.repository).forEach(function(o) {
+    utils.keys(self.repository).forEach(function(o) {
         if (o.indexOf(search) !== -1) {
             self.remove(o);
             count++;
@@ -616,12 +703,13 @@ Cache.prototype.removeAll = function(search) {
     @repository {Object}
     return {Template}
 */
-function Template(cache, template, model, repository) {
+function Template(framework, template, model, repository) {
 
     this.template = template;
     this.model = model;
     this.repository = repository || null;
-    this.cache = cache;
+    this.cache = framework.cache;
+    this.framework = framework;
 
     if (typeof(model) === 'undefined')
         model = '';
@@ -684,20 +772,22 @@ Template.prototype.parse = function(html, isRepository) {
             format = name.substring(index + 1, name.length - 1).trim();
             name = name.substring(1, index);
 
-            // format number
-            if (format.indexOf('#') !== -1) {
-                format = ".format('" + format + "')";
-            } else {
-                var condition = parseCondition(format);
-                if (condition.length === 0) {
-                    var count = utils.parseInt(format);
-                    if (count === 0) {
-                        format = ".format('" + format + "')";
+            var pluralize = parsePluralize(format);
+            if (pluralize.length === 0) {
+                if (format.indexOf('#') === -1) {
+                    var condition = parseCondition(format);
+                    if (condition.length === 0) {
+                        var count = utils.parseInt(format);
+                        if (count === 0) {
+                            format = ".format('" + format + "')";
+                        } else
+                            format = ".maxLength(" + (count + 3) + ",'...')";
                     } else
-                        format = ".maxLength(" + (count) + ",'...')";
+                        format = ".condition(" + condition + ")";
                 } else
-                    format = ".condition(" + condition + ")";
-            }
+                    format = ".format('" + format + "')";
+            } else
+                format = pluralize;
         }
         else
             name = name.substring(1, name.length - 1);
@@ -750,7 +840,7 @@ Template.prototype.parse = function(html, isRepository) {
     {
         return { generator: eval('(function(prop){return ' + fn.join('+') + ';})'), beg: beg, end: end, property: property, repositoryBeg: repositoryBeg, repositoryEnd: repositoryEnd };
     } catch (ex) {
-        self.controller.app.error(ex, 'Template compiler', self.controller.req.uri);
+        self.framework.emit('error', ex, self.framework.url, 'Template');
     }
 };
 
@@ -773,6 +863,49 @@ function parseCondition(value) {
         return "'{0}'".format(a);
 
     return "'{0}','{1}'".format(a, value.substring(index + 1, value.length - 1).replace(/\'/g, "\\'"));
+};
+
+function parsePluralize(value) {
+
+    value = value.trim();
+
+    var condition = value[0];
+    if (condition !== '"' && condition !== '\'')
+        return '';
+
+    var index = value.indexOf(condition, 1);
+    if (index === -1)
+        return '';
+
+    var a = value.substring(1, index).replace(/\'/g, "\\'");
+    var b = '';
+    var c = '';
+    var d = '';
+
+    var beg = value.indexOf(condition, index + 1);
+
+    if (beg === -1)
+        return '';
+
+    index = value.indexOf(condition, beg + 1);
+    b = value.substring(beg + 1, index).replace(/\'/g, "\\'");
+    c = '';
+
+    beg = value.indexOf(condition, index + 1);
+    if (beg === -1)
+        return '';
+
+    index = value.indexOf(condition, beg + 1);
+    c = value.substring(beg + 1, index).replace(/\'/g, "\\'");
+
+    beg = value.indexOf(condition, index + 1);
+    if (beg === -1)
+        return -1;
+
+    index = value.indexOf(condition, beg + 1);
+    d = value.substring(beg + 1, index).replace(/\'/g, "\\'");
+
+    return ".pluralize('{0}','{1}','{2}', '{3}')".format(a, b, c, d);
 };
 
 Template.prototype.load = function() {
@@ -882,9 +1015,7 @@ function template_compile_eval(generator, model, indexer) {
     return generator.generator.call(null, params);
 }
 
-function Utils() {
-    this.params = null;
-};
+function Utils() {};
 
 Utils.prototype.GUID = function(max) {
 
@@ -901,46 +1032,6 @@ Utils.prototype.GUID = function(max) {
     return str.substring(0, max);
 };
 
-Utils.prototype.keys = function(obj) {
-    if (typeof(Object.keys) !== 'undefined')
-        return Object.keys(obj);
-
-    var arr = [];
-
-    for (var m in obj)
-        arr.push(m);
-
-    return arr;
-};
-
-Utils.prototype.get = function (n) {
-
-    var self = this;
-
-    if (self.params === null) {
-        var params = window.location.href.slice(window.location.href.indexOf('?') + 1).split('&');
-        self.params = [];
-        for (var i = 0; i < params.length; i++) {
-            var param = params[i].split('=');
-            if (param.length !== 2)
-                continue;
-            self.params.push({ name: param[0], value: decodeURIComponent(param[1]) });
-        }
-    }
-
-    var arr = [];
-
-    self.params.forEach(function(param) {
-        if (param.name === n)
-            arr.push(param.value);
-    });
-
-    if (arr.length === 0)
-        return '';
-
-    return arr.length === 1 ? arr[0] : arr;
-};
-
 Utils.prototype.path = function (s, d) {
     if (typeof (d) === 'undefined')
         d = '/';
@@ -948,24 +1039,6 @@ Utils.prototype.path = function (s, d) {
     if (p !== d)
         s += d;
     return s;
-};
-
-Utils.prototype.url = function (b) {
-    var u = window.location.pathname;
-    if (typeof (b) === 'undefined')
-        b = true;
-    return b ? this.path(u) : u;
-};
-
-Utils.prototype.fragment = function (max) {
-    var arr = utils.url().split('/');
-    var builder = [];
-    arr.forEach(function (o, index) {
-        if (index > max)
-            return;
-        builder.push(o);
-    });
-    return utils.path(builder.join('/'));
 };
 
 Utils.prototype.pluralize = function (i, a, b, c) {
@@ -976,6 +1049,18 @@ Utils.prototype.pluralize = function (i, a, b, c) {
         return c;
 
     return a;
+};
+
+Utils.prototype.keys = function(obj) {
+    if (typeof(Object.keys) !== 'undefined')
+        return Object.keys(obj);
+
+    var arr = [];
+
+    for (var m in obj)
+        arr.push(m);
+
+    return arr;
 };
 
 /*
@@ -1008,6 +1093,184 @@ Utils.prototype.parseFloat = function(obj, def) {
 
     var str = type !== 'string' ? obj.toString() : obj;
     return str.parseFloat(def);
+};
+
+function quoteString(string) {
+    if (string.match(_escapeable)) {
+        return '"' + string.replace(_escapeable, function (a) {
+            var c = _meta[a];
+            if (typeof c === 'string') return c;
+            c = a.charCodeAt();
+            return '\\u00' + Math.floor(c / 16)
+                .toString(16) + (c % 16)
+                .toString(16);
+        }) + '"';
+    }
+    return '"' + string + '"';
+};
+
+function DOM_selector(query) {
+    var regex = /[=#@.*]/.exec(query)[0];
+    return (document[_selector[regex]](query.split(regex)[1]));
+};
+
+function DOM_content(query, html) {
+    var el = DOM_selector(query);
+
+    if (el === null)
+        return false;
+
+    if (typeof(el.length) === 'undefined') {
+        el.innerHTML = html;
+        return true;
+    }
+
+    for (var i = 0; i < el.length; i++)
+        el.innerHTML = html;
+
+    return el.length > 0;
+};
+
+function DOM_bind(el, type, cb) {
+
+    if (typeof(el) === 'string')
+        return DOM_bind(DOM_selector(el), type, cb);
+
+    if (typeof(el.length) !== 'undefined') {
+
+        for (var i = 0; i < el.length; i++)
+            DOM_bind(el[i], type, cb);
+
+        return el;
+    };
+
+    if (el.addEventListener)
+        el.addEventListener(type, cb, false);
+    else
+        el.attachEvent('on' + type, cb);
+
+    return el;
+};
+
+function DOM_unbind(el, type, cb) {
+
+    if (typeof(el) === 'string')
+        return DOM_unbind(DOM_selector(el), type, cb);
+
+    if (el.length > 0) {
+        for (var i = 0; i < el.length; i++)
+            DOM_unbind(el[i], type, cb);
+        return el;
+    };
+
+    if(el.removeEventListener)
+        el.removeEventListener(type, cb, false);
+    else
+        el.detachEvent('on' + type, cb);
+
+    return el;
+};
+
+function serializeForm(obj) {
+
+    var type = typeof(obj);
+
+    if (type === 'function')
+        return serializeForm(obj());
+
+    if (type !== 'object')
+        return (obj || '').toString();
+
+    var buffer = [];
+
+    for (var prop in obj) {
+        var val = obj[prop];
+        type = typeof(val);
+
+        if (type === 'function')
+            continue;
+
+        if (val === null)
+            continue;
+
+        buffer.push(encodeURIComponent(prop) + '=' + encodeURIComponent((val || '').toString()));
+    }
+
+    return buffer.join('&');
+};
+
+function serializeJSON(o) {
+
+    if (typeof (JSON) == 'object' && JSON.stringify)
+        return JSON.stringify(o);
+
+    var type = typeof(o);
+
+    if (o === null)
+        return 'null';
+
+    if (type === 'undefined')
+        return undefined;
+
+    if (type === 'number' || type === 'boolean')
+        return o + '';
+
+    if (type === 'string')
+        return quoteString(o);
+
+    if (type !== 'object')
+        return undefined;
+
+    if (o.constructor === Date) {
+        var month = o.getUTCMonth() + 1;
+        if (month < 10) month = '0' + month;
+        var day = o.getUTCDate();
+        if (day < 10) day = '0' + day;
+        var year = o.getUTCFullYear();
+        var hours = o.getUTCHours();
+        if (hours < 10) hours = '0' + hours;
+        var minutes = o.getUTCMinutes();
+        if (minutes < 10) minutes = '0' + minutes;
+        var seconds = o.getUTCSeconds();
+        if (seconds < 10) seconds = '0' + seconds;
+        var milli = o.getUTCMilliseconds();
+        if (milli < 100) milli = '0' + milli;
+        if (milli < 10) milli = '0' + milli;
+        return '"' + year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds + '.' + milli + 'Z"';
+    }
+
+    if (o.constructor === Array) {
+
+        var l = o.length;
+
+        var ret = [];
+        for (var i = 0; i < l; i++)
+            ret.push(serializeJSON(o[i]) || 'null');
+
+        return '[' + ret.join(',') + ']';
+    }
+
+    var pairs = [];
+
+    for (var k in o) {
+        var name;
+        var type = typeof k;
+
+        if (type === 'number')
+            name = '"' + k + '"';
+        else if (type === 'string')
+            name = quoteString(k);
+        else
+            continue;
+
+        if (typeof o[k] === 'function')
+            continue;
+
+        var val = serializeJSON(o[k]);
+        pairs.push(name + ':' + val);
+    }
+
+    return '{' + pairs.join(', ') + '}';
 };
 
 /*
@@ -1472,6 +1735,13 @@ String.prototype.parseFloat = function (def) {
     return num;
 };
 
+String.prototype.parseJSON = function() {
+    var src = this;
+    if (typeof (JSON) == 'object' && JSON.parse)
+        return JSON.parse(src);
+    return eval('(' + src + ')');
+};
+
 /*
     @max {Number}
     @c {String} :: optional
@@ -1521,6 +1791,11 @@ String.prototype.isNumber = function(isDecimal) {
     }
 
     return true;
+};
+
+String.prototype.pluralize = function(zero, one, few, other) {
+    var str = this.toString();
+    return str.parseInt().pluralize(zer, one, few, other)
 };
 
 /*
@@ -1650,6 +1925,38 @@ Number.prototype.format = function (format) {
     return this.format(output);
 };
 
+/*
+    Pluralize number
+    zero {String}
+    one {String}
+    few {String}
+    other {String}
+    return {String}
+*/
+Number.prototype.pluralize = function(zero, one, few, other) {
+
+    var num = this;
+    var value = '';
+
+    if (num === 0)
+        value = zero || '';
+    else if (num === 1)
+        value = one || '';
+    else if (num > 1 && num < 5)
+        value = few || '';
+    else
+        value = other;
+
+    var beg = value.indexOf('#');
+    var end = value.lastIndexOf('#');
+
+    if (beg === -1)
+        return value;
+
+    var format = value.substring(beg, end + 1);
+    return num.format(format) + value.replace(format, '');
+};
+
 Number.prototype.condition = function(ifTrue, ifFalse) {
     return (this % 2 === 0 ? ifTrue : ifFalse) || '';
 };
@@ -1736,113 +2043,5 @@ if (!Array.prototype.indexOf) {
     };
 }
 
-(function ($) {
-    $.toJSON = function (o) {
-        if (typeof (JSON) == 'object' && JSON.stringify) return JSON.stringify(o);
-        var type = typeof (o);
-        if (o === null) return 'null';
-        if (type === 'undefined') return undefined;
-        if (type === 'number' || type === 'boolean') return o + '';
-        if (type === 'string') return $.quoteString(o);
-        if (type === 'object') {
-            if (typeof o.toJSON === 'function') return $.toJSON(o.toJSON());
-            if (o.constructor === Date) {
-                var month = o.getUTCMonth() + 1;
-                if (month < 10) month = '0' + month;
-                var day = o.getUTCDate();
-                if (day < 10) day = '0' + day;
-                var year = o.getUTCFullYear();
-                var hours = o.getUTCHours();
-                if (hours < 10) hours = '0' + hours;
-                var minutes = o.getUTCMinutes();
-                if (minutes < 10) minutes = '0' + minutes;
-                var seconds = o.getUTCSeconds();
-                if (seconds < 10) seconds = '0' + seconds;
-                var milli = o.getUTCMilliseconds();
-                if (milli < 100) milli = '0' + milli;
-                if (milli < 10) milli = '0' + milli;
-                return '"' + year + '-' + month + '-' + day + 'T' + hours + ':' + minutes + ':' + seconds + '.' + milli + 'Z"';
-            }
-            if (o.constructor === Array) {
-
-                var l = o.length;
-
-                var ret = [];
-                for (var i = 0; i < l; i++)
-
-                    ret.push($.toJSON(o[i]) || 'null');
-                return '[' + ret.join(',') + ']';
-
-            }
-
-            var pairs = [];
-            for (var k in o) {
-
-                var name;
-                var type = typeof k;
-                if (type === 'number')
-                    name = '"' + k + '"';
-                else if (type === 'string')
-                    name = $.quoteString(k);
-                else continue;
-                if (typeof o[k] === 'function')
-                    continue;
-                var val = $.toJSON(o[k]);
-                pairs.push(name + ':' + val);
-            }
-
-            return '{' + pairs.join(', ') + '}';
-        }
-
-    };
-    $.evalJSON = function (src) {
-
-        if (typeof (JSON) == 'object' && JSON.parse)
-            return JSON.parse(src);
-        return eval('(' + src + ')');
-
-    };
-    $.secureEvalJSON = function (src) {
-        if (typeof (JSON) === 'object' && JSON.parse)
-            return JSON.parse(src);
-        var filtered = src;
-        filtered = filtered.replace(/\\["\\\/bfnrtu]/g, '@');
-        filtered = filtered.replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g, ']');
-        filtered = filtered.replace(/(?:^|:|,)(?:\s*\[)+/g, '');
-        if (/^[\],:{}\s]*$/.test(filtered))
-            return eval('(' + src + ')');
-        else throw new SyntaxError('Error parsing JSON, source is not valid.');
-    };
-    $.quoteString = function (string) {
-        if (string.match(_escapeable)) {
-            return '"' + string.replace(_escapeable, function (a) {
-                var c = _meta[a];
-                if (typeof c === 'string') return c;
-                c = a.charCodeAt();
-                return '\\u00' + Math.floor(c / 16)
-                    .toString(16) + (c % 16)
-                    .toString(16);
-            }) + '"';
-        }
-        return '"' + string + '"';
-    };
-    var _escapeable = /["\\\x00-\x1f\x7f-\x9f]/g;
-    var _meta = {
-        '\b': '\\b',
-        '\t': '\\t',
-        '\n': '\\n',
-        '\f': '\\f',
-        '\r': '\\r',
-        '"': '\\"',
-        '\\': '\\\\'
-    };
-})(jQuery);
-
 var framework = new Framework();
 var utils = new Utils();
-
-$.ajaxSetup({
-    error: function (x, e) {
-        framework.emit('error', e, framework.url, 'xhr');
-    }
-});
