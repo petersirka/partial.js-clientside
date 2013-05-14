@@ -1,5 +1,9 @@
+framework.partial('header', function() {
+	console.log('header');
+});
+
 framework.route('/', view_homepage);
-framework.route('/*', view_panel);
+framework.route('/*', view_panel, ['header']);
 framework.route('/products/', view_products);
 
 function view_homepage() {	

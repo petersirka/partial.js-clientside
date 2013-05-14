@@ -6,18 +6,20 @@ function Framework() {
 	this.routes = [];
 	this.events = {};
 	this.global = {};
-	this.cache = {};
 	this.templates = {};
 	this.repository = {};
 	this.resources = {};
-	this.resources['default'] = {};
 	this.locked = {};
+    this.partials = {};
 	this.url = '';
+    this.cache = new Cache(this);
+    this.cache.init();
+    this.resources['default'] = {};
 };
 
 Framework.prototype.on = function(name, fn) {
 	var self = this;
-	
+
 	var e = self.events[name];
 
 	if (e) {
@@ -46,8 +48,8 @@ Framework.prototype.emit = function(name) {
 	});
 };
 
-Framework.prototype.route = function(url, fn) {
-	
+Framework.prototype.route = function(url, fn, partial) {
+
 	var self = this;
 	var priority = url.count('/') + (url.indexOf('*') === -1 ? 0 : 10);
 	var route = self._route(url.trim());
@@ -61,7 +63,7 @@ Framework.prototype.route = function(url, fn) {
 		priority -= params.length;
 	}
 
-	self.routes.push({ url: route, fn: fn, priority: priority, params: params });
+	self.routes.push({ url: route, fn: fn, priority: priority, params: params, partial: partial || [] });
 
 	self.routes.sort(function(a, b) {
 		if (a.priority > b.priority)
@@ -70,10 +72,39 @@ Framework.prototype.route = function(url, fn) {
 		if (a.priority < b.priority)
 			return 1;
 
-		return 0;		
+		return 0;
 	});
 
 	return self;
+};
+
+Framework.prototype.partial = function(name, fn) {
+    var self = this;
+
+    if (typeof(fn) === 'undefined') {
+
+        if (name instanceof Array) {
+
+            name.forEach(function(o) {
+                var partial = self.partials[name] || null;
+                if (partial === null)
+                    return;
+
+                partial.call(self, self.url);
+            });
+
+            return self;
+        }
+
+        var partial = self.partials[name] || null;
+        if (partial !== null)
+            partial.call(self, self.url);
+
+        return;
+    };
+
+    self.partials[name] = fn;
+    return self;
 };
 
 Framework.prototype._route = function(url) {
@@ -89,12 +120,12 @@ Framework.prototype._route = function(url) {
 	if (arr.length === 1 && arr[0] === '')
 		arr[0] = '/';
 
-	return arr;	
+	return arr;
 };
 
 Framework.prototype._routeParam = function(routeUrl, route) {
 	var arr = [];
-	
+
 	if (!route || !routeUrl)
 		return arr;
 
@@ -110,7 +141,7 @@ Framework.prototype._routeParam = function(routeUrl, route) {
 };
 
 Framework.prototype._routeCompare = function(url, route) {
-	
+
 	var skip = url.length === 1 && url[0] === '/';
 
 	for (var i = 0; i < url.length; i++) {
@@ -138,7 +169,7 @@ Framework.prototype.location = function(url) {
     var index = url.indexOf('?');
     if (index !== -1)
         url = url.substring(0, index);
-    
+
     url = utils.path(url);
 
 	var self = this;
@@ -155,23 +186,48 @@ Framework.prototype.location = function(url) {
 		}
 	}
 
+    var isError = false;
+
 	self.url = url;
 	self.repository = {};
 	utils.params = null;
-
 	self.emit('location', url);
 
 	routes.forEach(function(route) {
-		try
-		{
+
+        try
+        {
+            route.partial.forEach(function(o) {
+                var partial = self.partial[o];
+                if (typeof(partial) === 'undefined')
+                    return;
+                partial.call(self, self.url);
+            });
+        } catch (ex) {
+            isError = true;
+            self.emit('error', ex, url, 'execute - partial');
+        }
+
+        try
+        {
 			route.fn.apply(self, self._routeParam(path, route));
 		} catch (ex) {
-			self.emit('error', ex, url);
+            isError = true;
+			self.emit('error', ex, url, 'execute - route');
 		}
 	});
 
+    if (isError)
+        self.status(500);
+
 	if (notfound)
-		self.emit('404', url);
+		self.status(404);
+};
+
+Framework.prototype.status = function(code) {
+    var self = this;
+    self.emit('status', code || 404);
+    return self;
 };
 
 Framework.prototype.template = function(name, model) {
@@ -191,7 +247,7 @@ Framework.prototype.resource = function(name, key) {
 	return resource[key] || '';
 };
 
-Framework.prototype.post = function(url, data, cb, key) {
+Framework.prototype.post = function(url, data, cb, key, expire) {
 
 	var self = this;
 
@@ -199,18 +255,19 @@ Framework.prototype.post = function(url, data, cb, key) {
 		return false;
 
 	var isCache = (typeof(key) !== 'undefined');
+
 	var post = (function() {
-		
+
 		self.locked[url] = true;
 		self.emit('post', true, url);
 
 		$.post(url, data, function(d) {
-			
+
 			delete self.locked[url];
 			self.emit('post', false, url, d);
 
 			if (isCache)
-				self.cache[key] = d;
+				self.cache.write(key, d, new Date().add('m', expire || 10));
 
 			cb(d);
 		});
@@ -221,7 +278,7 @@ Framework.prototype.post = function(url, data, cb, key) {
 		return true;
 	}
 
-	var d = self.cache[key] || null;
+	var d = self.cache.read(key);
 	if (d === null)
 		post();
 	else
@@ -230,7 +287,7 @@ Framework.prototype.post = function(url, data, cb, key) {
 	return true;
 };
 
-Framework.prototype.get = function(url, cb, key) {
+Framework.prototype.get = function(url, cb, key, expire) {
 
 	var self = this;
 
@@ -249,7 +306,7 @@ Framework.prototype.get = function(url, cb, key) {
 			self.emit('get', false, url, d);
 
 			if (isCache)
-				self.cache[key] = d;
+				self.cache.write(key, d, new Date().add('m', expire || 10));
 
 			cb(d);
 		});
@@ -260,7 +317,7 @@ Framework.prototype.get = function(url, cb, key) {
 		return self;
 	}
 
-	var d = self.cache[key] || null;
+	var d = self.cache.read(key);
 	if (d === null)
 		get();
 	else
@@ -278,10 +335,10 @@ Framework.prototype.get = function(url, cb, key) {
 	return {ErrorBuilder}
 */
 Framework.prototype.validate = function(model, properties, resource, prefix) {
-	
+
 	var error = [];
 	var self = this;
-	
+
 	var prepare = function(name, value) {
 		return self.onValidation.call(self, name, value);
 	};
@@ -293,7 +350,7 @@ Framework.prototype.validate = function(model, properties, resource, prefix) {
 		model = {};
 
 	for (var i = 0; i < properties.length; i++) {
-		
+
 		var type = typeof(value);
 		var name = properties[i].toString();
 		var value = (type === 'function' ? model[name]() : model[name]) || '';
@@ -305,7 +362,7 @@ Framework.prototype.validate = function(model, properties, resource, prefix) {
 			continue;
 		};
 
-		var result = prepare(name, value);	
+		var result = prepare(name, value);
 
 		if (typeof(result) === 'undefined')
 			continue;
@@ -324,7 +381,7 @@ Framework.prototype.validate = function(model, properties, resource, prefix) {
 			continue;
 		}
 	};
-	
+
 	return error;
 };
 
@@ -338,12 +395,182 @@ Framework.prototype.redirect = function(url) {
 
     history.pushState(null, null, url);
     self.location(url);
-    
+
     return self;
 };
 
 Framework.prototype.onValidation = null;
 Framework.prototype.onPrefix = null;
+
+Framework.prototype.cookie = {
+    read: function (name) {
+        var arr = document.cookie.split(';');
+        for (var i = 0; i < arr.length; i++) {
+            var c = arr[i];
+            if (c.charAt(0) === ' ')
+                c = c.substring(1);
+            var v = c.split('=');
+            if (v.length > 1) {
+                if (v[0] == name)
+                    return v[1];
+            }
+        }
+        return '';
+    },
+    write: function (name, value, expire) {
+        var expires = '';
+        var cookie = '';
+        if (typeof (expire) === 'number') {
+            var date = new Date();
+            date.setTime(date.getTime() + (expire * 24 * 60 * 60 * 1000));
+            expires = '; expires=' + date.toGMTString();
+        } else if (expire instanceof Date)
+            expires = '; expires=' + expire.toGMTString();
+        document.cookie = name + '=' + value + expires + '; path=/';
+    },
+    remove: function (name) {
+        this.write(name, '', -1);
+    }
+};
+
+function CacheItem(id, expire, value) {
+    this.id = id;
+    this.expire = expire;
+    this.value = value;
+    this.isRemoved = false;
+};
+
+/*
+    Cache class
+    @application {Framework}
+*/
+function Cache(framework) {
+    this.repository = {};
+    this.count = 1;
+    this.framework = framework;
+    this.interval = null;
+};
+
+Cache.prototype.init = function() {
+    var self = this;
+    self.interval = setInterval(function() {
+        self.recycle();
+    }, 1000 * 60);
+    return self;
+};
+
+Cache.prototype.clear = function() {
+    var self = this;
+    self.repository = {};
+    return self;
+};
+
+/*
+    Internal function
+    return {Cache}
+*/
+Cache.prototype.recycle = function() {
+
+    var self = this;
+    var repository = self.repository;
+    var keys = Object.keys(repository);
+
+    if (keys.length === 0) {
+        self.framework.emit('service', self.count++);
+        return self;
+    }
+
+    var expire = new Date();
+
+    keys.forEach(function(o) {
+        if (repository[o].expire < expire)
+            delete repository[o];
+    });
+
+    self.framework.emit('service', self.count++);
+    return self;
+};
+
+/*
+    Add item to cache
+    @name {String}
+    @value {Object}
+    @expire {Date}
+    return @value
+*/
+Cache.prototype.write = function(name, value, expire) {
+    var self = this;
+
+    if (typeof(expire) === 'undefined')
+        expire = new Date().add('m', 5);
+
+    self.repository[name] = { value: value, expire: expire };
+    return value;
+};
+
+/*
+    Read item from cache
+    @name {String}
+    return {Object}
+*/
+Cache.prototype.read = function(name) {
+    var self = this;
+    var value = self.repository[name] || null;
+
+    if (value === null)
+        return null;
+
+    return value.value;
+};
+
+/*
+    Update cache item expiration
+    @name {String}
+    @expire {Date}
+    return {Cache}
+*/
+Cache.prototype.setExpires = function(name, expire) {
+    var self = this;
+    var obj = self.repository[name];
+
+    if (typeof(obj) === 'undefined')
+        return self;
+
+    obj.expire = expire;
+    return self;
+};
+
+/*
+    Remove item from cache
+    @name {String}
+    return {Object} :: return value;
+*/
+Cache.prototype.remove = function(name) {
+    var self = this;
+    var value = self.repository[name] || null;
+
+    delete self.repository[name];
+    return value;
+};
+
+/*
+    Remove all
+    @search {String}
+    return {Number}
+*/
+Cache.prototype.removeAll = function(search) {
+    var self = this;
+    var count = 0;
+
+    Object.keys(self.repository).forEach(function(o) {
+        if (o.indexOf(search) !== -1) {
+            self.remove(o);
+            count++;
+        }
+    });
+
+    return count;
+};
 
 function Utils() {
 	this.params = null;
@@ -369,36 +596,17 @@ Utils.prototype.keys = function(obj) {
 		return Object.keys(obj);
 
   	var arr = [];
-  
+
 	for (var m in obj)
 		arr.push(m);
 
 	return arr;
 };
 
-Utils.prototype.eTe = function (el, data) {
-
-    if (data === null)
-        return false;
-
-    var isError = data instanceof Array;
-
-    el = $(el);
-    if (isError) {
-        el.find('> div').remove();
-        data.forEach(function (d) {
-            el.append('<div>' + (d.error || d.V) + '</div>');
-        });
-        el.show();
-    } else
-        el.hide();
-
-    return isError;
-};
-
 Utils.prototype.get = function (n) {
-    
+
     var self = this;
+
     if (self.params === null) {
         var params = window.location.href.slice(window.location.href.indexOf('?') + 1).split('&');
         self.params = [];
@@ -410,14 +618,17 @@ Utils.prototype.get = function (n) {
         }
     }
 
-    var p = self.params.find(function (o) {
-        return o.name == n;
+    var arr = [];
+
+    self.params.forEach(function(param) {
+        if (param.name === n)
+            arr.push(param.value);
     });
 
-    if (p === null)
+    if (arr.length === 0)
         return '';
 
-    return p.value || '';
+    return arr.length === 1 ? arr[0] : arr;
 };
 
 Utils.prototype.path = function (s, d) {
@@ -484,20 +695,6 @@ Utils.prototype.scroll = function (y, s) {
     $('html,body').animate({ scrollTop: y }, s || 300);
 };
 
-Utils.prototype.dateDiff = function (dB, dE) {
-    return Math.round((dE - dB) / (1000 * 60 * 60 * 24));
-};
-
-Utils.prototype.dateDays = function (y, m) {
-    return (32 - new Date(y, m, 32).getDate());
-};
-
-Utils.prototype.dateWeek = function (d) {
-    var j = new Date(d.getFullYear(), 0, 1);
-    var d = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    return Math.ceil((((d - j) / 86400000) + j.getDay() + 1) / 7) - 1;
-};
-
 Utils.prototype.getValue = function (o, isNumber) {
     var obj = $(o);
 
@@ -562,26 +759,6 @@ Utils.prototype.setIndex = function (o, i) {
     return $(obj);
 };
 
-Utils.prototype.setProp = function (o, v) {
-    var el = $(o);
-    if (el.length == 0)
-        return el;
-
-    return $(o).attr('itemprop', v);
-};
-
-Utils.prototype.getProp = function (o, isNumber) {
-    var el = $(o);
-    if (el.length == 0)
-        return el;
-
-    var v = el.attr('itemprop');
-    if (isNumber)
-        return v.parseInt();
-
-    return v;
-};
-
 Utils.prototype.setValue = function (o, v) {
     var obj = $(o);
 
@@ -603,7 +780,6 @@ Utils.prototype.setValue = function (o, v) {
                 return el;
             }
         }
-
         return el;
     }
 
@@ -635,7 +811,7 @@ Utils.prototype.setValues = function (f, h) {
     }
 
     var index = 0;
-    
+
     $(f).find('input,select,textarea').each(function () {
         h.call(this, this, index++);
     });
@@ -667,40 +843,6 @@ Utils.prototype.optionCreate = function (el, text, value, callback) {
     return obj;
 };
 
-Utils.prototype.cookie = {
-    read: function (name) {
-        var arr = document.cookie.split(';');
-        for (var i = 0; i < arr.length; i++) {
-            var c = arr[i];
-            if (c.charAt(0) === ' ')
-                c = c.substring(1);
-            var v = c.split('=');
-            if (v.length > 1) {
-                if (v[0] == name)
-                    return v[1];
-            }
-        }
-        return '';
-    },
-
-    write: function (name, value, expire) {
-        var expires = '';
-        var cookie = '';
-        if (typeof (expire) === 'number') {
-            var date = new Date();
-            date.setTime(date.getTime() + (expire * 24 * 60 * 60 * 1000));
-            expires = '; expires=' + date.toGMTString();
-        } else if (expire instanceof Date) {
-            expires = '; expires=' + expire.toGMTString();
-        }
-        document.cookie = name + '=' + value + expires + '; path=/';
-    },
-
-    remove: function (name) {
-        this.write(name, '', -1);
-    }
-};
-
 Utils.prototype.confirm = function (b, message) {
 
     if (!b) {
@@ -721,45 +863,6 @@ Utils.prototype.confirm = function (b, message) {
     };
 };
 
-Utils.prototype.opacity = function (v, h) {
-    var el = $('#opacity');
-    var self = this;
-
-    if (el.length == 0) {
-        $(document.body).append('<div id="opacity"></div>');
-        el = $('#opacity');
-    }
-
-    if (v) {
-        el.show();
-        self.emit('opacity', true);
-    }
-    else {
-        el.hide();
-        self.emit('opacity', false);
-    }
-
-    h && h(el, v);
-    return el;
-};
-
-Utils.prototype.share = {
-    facebook: function (url, title) {
-        url = url || window.location.href;
-        title = title || document.title;
-        window.location.href = 'http://www.facebook.com/sharer.php?u=' + encodeURIComponent(url) + '&t=' + encodeURIComponent(title);
-    },
-    twitter: function (url, title) {
-        url = url || window.location.href;
-        title = title || document.title;
-        window.location.href = 'http://twitter.com/share?url=' + encodeURIComponent(url) + '&via=' + encodeURIComponent(title);
-    },
-    google: function (url) {
-        url = url || window.location.href;
-        window.location.href = 'https://plus.google.com/share?url=' + encodeURIComponent(url);
-    }
-};
-
 Utils.prototype.pluralize = function (i, a, b, c) {
     if (i === 1)
         return b;
@@ -768,34 +871,6 @@ Utils.prototype.pluralize = function (i, a, b, c) {
         return c;
 
     return a;
-};
-
-Utils.prototype.init = {
-    facebook: function (lang, appId) {
-        lang = lang || 'sk_SK';
-        appId = appId || '346088855483095';
-        (function (d, s, id) {
-            var js, fjs = d.getElementsByTagName(s)[0];
-            if (d.getElementById(id)) return;
-            js = d.createElement(s); js.id = id;
-            js.src = '//connect.facebook.net/' + lang + '/all.js#xfbml=1&appId=' + appId;
-            fjs.parentNode.insertBefore(js, fjs);
-        }(document, 'script', 'facebook-jssdk'));
-    },
-    google: function () {
-        (function () {
-            var po = document.createElement('script'); po.type = 'text/javascript'; po.async = true;
-            po.src = 'https://apis.google.com/js/plusone.js';
-            var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(po, s);
-        })();
-    },
-    twitter: function () {
-        (function () {
-            var po = document.createElement('script'); po.type = 'text/javascript'; po.async = true;
-            po.src = 'http://platform.twitter.com/widgets.js';
-            var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(po, s);
-        })();
-    }
 };
 
 /*
@@ -812,7 +887,7 @@ function Async() {
 
 Async.prototype.on = function(name, fn) {
 	var self = this;
-	
+
 	var e = self.events[name];
 
 	if (e) {
@@ -851,10 +926,10 @@ Async.prototype._complete = function(name, waiting) {
 	var self = this;
 
 	if (!waiting) {
-		
+
 		if (typeof(self.pending[name]) === 'undefined')
 			return self;
-		
+
 		delete self.pending[name];
 	}
 
@@ -947,11 +1022,11 @@ Async.prototype.wait = function(name, waitingFor, fn) {
 	return {Async}
 */
 Async.prototype.complete = function(fn) {
-	
+
 	var self = this;
 	self.onComplete = fn;
 	self.isRunning = true;
-	
+
 	utils.keys(self.pending).forEach(function(name) {
 		self.emit('begin', name);
 		self.pending[name]();
@@ -1082,7 +1157,7 @@ String.prototype.count = function(text) {
     var index = 0;
     var count = 0;
     do {
-        
+
         index = this.indexOf(text, index + text.length);
 
         if (index > 0)
@@ -1281,7 +1356,7 @@ String.prototype.padRight = function (max, c) {
 	return {Boolean}
 */
 String.prototype.isNumber = function(isDecimal) {
-	
+
 	var self = this.toString();
 
 	if (self.length === 0)
@@ -1302,7 +1377,7 @@ String.prototype.isNumber = function(isDecimal) {
 		if (ascii < 48 || ascii > 57)
 			return false;
 	}
-	
+
 	return true;
 };
 
@@ -1515,12 +1590,12 @@ if (!Array.prototype.indexOf) {
     $.toJSON = function (o) {
         if (typeof (JSON) == 'object' && JSON.stringify) return JSON.stringify(o);
         var type = typeof (o);
-        if (o === null) return "null";
-        if (type === "undefined") return undefined;
-        if (type === "number" || type === "boolean") return o + '';
-        if (type === "string") return $.quoteString(o);
+        if (o === null) return 'null';
+        if (type === 'undefined') return undefined;
+        if (type === 'number' || type === 'boolean') return o + '';
+        if (type === 'string') return $.quoteString(o);
         if (type === 'object') {
-            if (typeof o.toJSON == "function") return $.toJSON(o.toJSON());
+            if (typeof o.toJSON === 'function') return $.toJSON(o.toJSON());
             if (o.constructor === Date) {
                 var month = o.getUTCMonth() + 1;
                 if (month < 10) month = '0' + month;
@@ -1545,8 +1620,8 @@ if (!Array.prototype.indexOf) {
                 var ret = [];
                 for (var i = 0; i < l; i++)
 
-                    ret.push($.toJSON(o[i]) || "null");
-                return "[" + ret.join(",") + "]";
+                    ret.push($.toJSON(o[i]) || 'null');
+                return '[' + ret.join(',') + ']';
 
             }
 
@@ -1555,17 +1630,18 @@ if (!Array.prototype.indexOf) {
 
                 var name;
                 var type = typeof k;
-                if (type === "number")
+                if (type === 'number')
                     name = '"' + k + '"';
-                else if (type === "string")
+                else if (type === 'string')
                     name = $.quoteString(k);
                 else continue;
-                if (typeof o[k] === "function")
+                if (typeof o[k] === 'function')
                     continue;
                 var val = $.toJSON(o[k]);
-                pairs.push(name + ":" + val);
+                pairs.push(name + ':' + val);
             }
-            return "{" + pairs.join(", ") + "}";
+
+            return '{' + pairs.join(', ') + '}';
         }
 
     };
@@ -1573,7 +1649,7 @@ if (!Array.prototype.indexOf) {
 
         if (typeof (JSON) == 'object' && JSON.parse)
             return JSON.parse(src);
-        return eval("(" + src + ")");
+        return eval('(' + src + ')');
 
     };
     $.secureEvalJSON = function (src) {
@@ -1584,8 +1660,8 @@ if (!Array.prototype.indexOf) {
         filtered = filtered.replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g, ']');
         filtered = filtered.replace(/(?:^|:|,)(?:\s*\[)+/g, '');
         if (/^[\],:{}\s]*$/.test(filtered))
-            return eval("(" + src + ")");
-        else throw new SyntaxError("Error parsing JSON, source is not valid.");
+            return eval('(' + src + ')');
+        else throw new SyntaxError('Error parsing JSON, source is not valid.');
     };
     $.quoteString = function (string) {
         if (string.match(_escapeable)) {
@@ -1612,769 +1688,11 @@ if (!Array.prototype.indexOf) {
     };
 })(jQuery);
 
-
-function Upload() {
-    this.events = [];
-    this.isBusy = false;
-};
-
-Upload.prototype.submit = function (url, files, data) {
-
-    var self = this;
-
-    if (self.isBusy)
-        return false;
-
-    var fd = new FormData();
-
-    for (var i = 0; i < files.length; i++)
-        fd.append('file' + (i + 1), files[i]);
-
-    if (typeof (data) !== 'undefined' && data !== null) {
-        for (var key in data)
-            fd.append(key, data[key]);
-    }
-
-    var xhr = new XMLHttpRequest();
-
-    xhr.addEventListener('load', function () {
-        self.isBusy = false;
-        self.emit('complete', this.responseText);
-    }, false);
-
-    xhr.upload.addEventListener('progress', function (evt) {
-        var percentage = 0;
-
-        if (evt.lengthComputable)
-            percentage = Math.round(evt.loaded * 100 / evt.total);
-
-        self.emit('progress', percentage, evt.transferSpeed, evt.timeRemaining);
-    }, false);
-
-    xhr.addEventListener('error', function (e) {
-        self.isBusy = false;
-        self.emit('error', e);
-    }, false);
-
-    xhr.addEventListener("abort", function () {
-        self.isBusy = false;
-        self.emit('cancel');
-    }, false);
-
-    self.isBusy = true;
-    self.emit('begin');
-
-    xhr.open('POST', url);
-    xhr.send(fd);
-
-    return true;
-};
-
-Upload.prototype.on = function (name, fn) {
-    var self = this;
-    self.events.push({ name: name, fn: fn });
-    return self;
-};
-
-Upload.prototype.emit = function () {
-    var self = this;
-    var name = arguments[0];
-
-    var arr = [];
-    for (var i = 0; i < arguments.length; i++) {
-        if (i > 0)
-            arr.push(arguments[i]);
-    };
-
-    self.events.forEach(function (o) {
-        if (o.name === name)
-            o.fn.apply(self, arr);
-    });
-
-    return self;
-};
-
-function TouchPaging(element, options) {
-
-    this.events = [];
-    this.options = $.extend({ minDifferenceX: 100, maxDifferenceY: 50 }, options);
-
-    var begX = 0;
-    var begY = 0;
-    var self = this;
-    var el = $(element);
-
-    el.bind('touchstart touchmove', function (e) {
-        var t = e.originalEvent.touches[0];
-        var x = t.pageX;
-        var y = t.pageY;
-
-        if (e.type === 'touchstart') {
-            begX = x;
-            begY = y;
-            return;
-        }
-
-        if (e.type !== 'touchmove')
-            return;
-
-        var r = false;
-
-        if (Math.abs(begX - x) > self.options.minDifferenceX && Math.abs(begY - y) < self.options.maxDifferenceY)
-            r = self.emit(begX < x ? 'prev' : 'next', begX, x);
-
-        if (r)
-            el.unbind('touchstart touchmove');
-    });
-};
-
-TouchPaging.prototype.on = function (name, fn) {
-    var self = this;
-    self.events.push({ name: name, fn: fn });
-    return self;
-};
-
-TouchPaging.prototype.emit = function () {
-    var self = this;
-    var name = arguments[0];
-
-    var arr = [];
-    for (var i = 0; i < arguments.length; i++) {
-        if (i > 0)
-            arr.push(arguments[i]);
-    };
-
-    self.events.forEach(function (o) {
-        if (o.name === name)
-            o.fn.apply(self, arr);
-    });
-
-    return self;
-};
-
-function Scroller(element, direction, mouseDisabled) {
-
-    this.events = [];
-    this.options = { begX: 0, endX: 0, begY: 0, endY: 0, begTime: 0 };
-    var el = $(element);
-
-    var self = this;
-
-    el.bind((!mouseDisabled ? 'mousedown mouseup ' : '') + 'touchstart touchmove', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        var x = 0;
-        var y = 0;
-
-        if (e.type.indexOf('touch') === -1) {
-            x = e.pageX;
-            y = e.pageY;
-        } else {
-            var touch = e.originalEvent.touches[0];
-            x = touch.pageX;
-            y = touch.pageY;
-        }
-
-        if (e.type === 'mousedown' || e.type === 'touchstart') {
-            self.options.begTime = new Date().getTime();
-            self.options.begX = x;
-            self.options.begY = y;
-            self.emit('start', x, y, el);
-            return;
-        }
-
-        self.options.endX = x;
-        self.options.endY = y;
-
-        var interval = new Date().getTime() - self.options.begTime;
-        if (interval > 500)
-            interval = 500;
-
-        var obj = {};
-
-        var position = direction === 'scrollLeft' ? self.options.begX - self.options.endX : self.options.begY - self.options.endY;
-        obj[direction] = '+=' + position + 'px';
-
-        el.stop().animate(obj, interval * 2, function () {
-            self.emit('scroll', position, el);
-        });
-    });
-};
-
-Scroller.prototype.on = function (name, fn) {
-    var self = this;
-    self.events.push({ name: name, fn: fn });
-    return self;
-};
-
-Scroller.prototype.emit = function () {
-    var self = this;
-    var name = arguments[0];
-
-    var arr = [];
-    for (var i = 0; i < arguments.length; i++) {
-        if (i > 0)
-            arr.push(arguments[i]);
-    };
-
-    self.events.forEach(function (o) {
-        if (o.name === name)
-            o.fn.apply(self, arr);
-    });
-
-    return self;
-};
-
-function AutoComplete(options, url) {
-
-    if (typeof (options) === 'string')
-        options = { target: options };
-
-    this.options = $.extend({ id: 'autocomplete_' + new Date().getTime(), url: url || '', minimumChar: 3, offsetLeft: 0, offsetTop: 5, target: null, className: 'autocomplete', params: '' }, options);
-    this.datasource = [];
-    this.events = [];
-    this.cache = {};
-    this.options.target = $(this.options.target);
-
-    this.isBusy = false;
-    this.autorun = null;
-
-    this.index = -1;
-    this.isMouse = false;
-
-    this.container = $(this.options.id);
-    this.create();
-
-    this.onDraw = function (item) {
-        return '<li>' + (item.name || item.K || '') + '</li>';
-    };
-};
-
-AutoComplete.prototype.cacheWrite = function (query, data) {
-    var self = this;
-    self.cache[query] = data;
-    return self;
-};
-
-AutoComplete.prototype.cacheRead = function (query) {
-    return this.cache[query] || null;
-};
-
-AutoComplete.prototype.create = function () {
-
-    var self = this;
-
-    if (self.container.length > 0)
-        return self;
-
-    $(document.body).append('<ul id="' + self.options.id + '" class="' + self.options.className + '"></ul>');
-    self.container = $('#' + self.options.id);
-
-    $(self.options.target).bind('keyup blur keypress', function (e) {
-
-        if (e.type === 'keypress') {
-            if (self.index != -1 && (e.keyCode == 13 || e.keyCode == 38 || e.keyCode == 40))
-                e.preventDefault();
-            return;
-        }
-
-        if (e.type === 'blur') {
-            if (!self.isMouse)
-                self.hide();
-            return true;
-        }
-
-        var v = this.value;
-        if (v.length <= self.options.minimumChar) {
-            self.hide();
-            return true;
-        }
-
-        switch (e.keyCode) {
-            case 8:
-                self.search();
-                return true;
-            case 9:
-            case 17:
-            case 18:
-            case 37:
-            case 39:
-            case 224:
-                return true;
-            case 38:
-            case 40:
-            case 13:
-            case 27:
-                self.onKeypress(e);
-                return true;
-        }
-
-        self.search(this.value);
-    });
-
-    return self;
-};
-
-AutoComplete.prototype.bind = function () {
-    var self = this;
-    self.container.find('li').bind('mousemove mouseleave mouseenter click', function (e) {
-
-        if (e.type === 'mousemove' || e.type === 'mouseleave') {
-            self.isMouse = e.type === 'mousemove';
-            return;
-        }
-
-        var el = $(this);
-
-        if (e.type === 'click') {
-            self.index = el.index();
-            self.hide();
-            self.emit('select', self.datasource[self.index], self.index);
-            return;
-        }
-
-        var d = self.container.find('li');
-        d.eq(self.index).removeClass('selected');
-        self.index = el.index();
-        d.eq(self.index).addClass('selected');
-    });
-};
-
-AutoComplete.prototype.show = function () {
-    var self = this;
-    var el = self.options.target;
-    var off = el.offset();
-    self.container.css({ left: off.left + self.options.offsetLeft, top: off.top + el.height() + self.options.offsetTop }).show();
-    return self;
-};
-
-AutoComplete.prototype.hide = function () {
-    var self = this;
-    self.container.hide();
-    return self;
-};
-
-AutoComplete.prototype.onKeypress = function (e) {
-    var self = this;
-    var code = e.keyCode;
-
-    e.cancelBubble = true;
-    e.returnValue = false;
-
-    if (code !== 38 && code !== 40 && code !== 27 && code !== 13)
-        return true;
-
-    var div = self.container.find('li');
-    div.eq(self.index).toggleClass('selected', false);
-
-    switch (code) {
-        case 38:
-            if (self.index > 0)
-                self.index--;
-            break;
-        case 40:
-            if (self.datasource.length > 0 && !self.container.is(':visible'))
-                self.show();
-
-            if (self.index < self.datasource.length - 1)
-                self.index++;
-            break;
-        case 27:
-            self.container.hide();
-            return;
-        case 13:
-            if (self.container.is(':visible')) {
-                self.hide();
-                self.emit('select', self.datasource[self.index], self.index);
-            }
-            return;
-    }
-
-    div.eq(self.index).toggleClass('selected', true);
-};
-
-
-AutoComplete.prototype.search = function (q) {
-    var self = this;
-    var el = self.options.target;
-
-    if (typeof (q) === 'undefined')
-        q = el.val();
-
-    if (q.length <= self.options.minimumChar)
-        return;
-
-    var cache = self.cacheRead(q);
-
-    if (cache === null) {
-
-        if (self.autorun !== null) {
-            clearTimeout(self.autorun);
-            self.autorun = null;
-        }
-
-        self.autorun = setTimeout(function () {
-
-            if (self.isBusy)
-                return;
-
-            self.isBusy = true;
-            $.get(self.options.url + '?q=' + encodeURIComponent(q) + (self.options.params.length > 0 ? '&' + self.options.params : ''), function (d) {
-
-                self.isBusy = false;
-                self.container.empty();
-                d = utils.JtO(d);
-
-                if (d === null)
-                    d = [];
-
-                d.forEach(function (o, i) {
-                    self.container.append(self.onDraw(o, i));
-                });
-
-                self.datasource = d;
-                self.cacheWrite(q, d);
-                index = -1;
-
-                if (self.datasource.length > 0) {
-                    self.bind();
-                    self.show();
-                }
-                else
-                    self.hide();
-            });
-
-        }, 100);
-        return;
-    }
-
-    if (cache.length == 0) {
-        self.hide();
-        self.datasource = [];
-        return;
-    }
-
-    self.container.empty();
-
-    if (cache.length === 0) {
-        self.hide();
-        return;
-    }
-
-    self.datasource = [];
-    cache.forEach(function (o, i) {
-        self.datasource.push(o);
-        self.container.append(self.onDraw(o, i));
-    });
-    self.bind();
-    self.index = -1;
-    self.show();
-};
-
-AutoComplete.prototype.on = function (name, fn) {
-    var self = this;
-    self.events.push({ name: name, fn: fn });
-    return self;
-};
-
-AutoComplete.prototype.emit = function () {
-    var self = this;
-    var name = arguments[0];
-
-    var arr = [];
-    for (var i = 0; i < arguments.length; i++) {
-        if (i > 0)
-            arr.push(arguments[i]);
-    };
-
-    self.events.forEach(function (o) {
-        if (o.name === name)
-            o.fn.apply(self, arr);
-    });
-
-    return self;
-};
-
-function Calendar() {
-    this.events = [];
-    this.cache = {};
-    this.now = new Date();
-    this.selected = [];
-    this.id = "calendar" + this.now.getTime();
-    this.year = this.now.getFullYear();
-    this.month = this.now.getMonth();
-    this.monthName = ['Január', 'Február', 'Marec', 'Apríl', 'Máj', 'Jún', 'Júl', 'August', 'September', 'Október', 'November', 'December'];
-    this.firstDay = 1;
-    this.days = 0;
-    this.day = 0;
-    this.dayName = ['NE', 'PO', 'UT', 'ST', 'ŠT', 'PI', 'SO'];
-}
-
-Calendar.prototype.on = function (name, fn) {
-    var self = this;
-    self.events.push({ name: name, fn: fn });
-    return self;
-};
-
-Calendar.prototype.emit = function () {
-    var self = this;
-    var name = arguments[0];
-
-    var arr = [];
-    for (var i = 0; i < arguments.length; i++) {
-        if (i > 0)
-            arr.push(arguments[i]);
-    };
-
-    self.events.forEach(function (o) {
-        if (o.name === name)
-            o.fn.apply(self, arr);
-    });
-
-    return self;
-};
-
-Calendar.prototype.setToday = function () {
-    var self = this;
-    self.setDate(self.now.getFullYear(), self.now.getMonth(), self.now.getDate());
-    return self;
-};
-
-Calendar.prototype.setDate = function (y, m, d) {
-    var self = this;
-    var Y = y;
-    var M = m;
-    var D = d;
-
-    if (arguments.length === 0) {
-        var dd = new Date();
-        Y = dd.getFullYear();
-        M = dd.getMonth();
-        D = dd.getDate();
-    }
-
-    self.days = utils.dateDays(Y, M);
-    if (self.day > self.days)
-        self.day = self.days;
-    else
-        self.day = D;
-
-    self.year = Y;
-    self.month = M;
-
-    self.emit("change");
-    self.render();
-};
-
-Calendar.prototype.getYear = function () {
-    return this.year;
-};
-
-Calendar.prototype.getDate = function () {
-    var self = this;
-    var d = new Date(self.year, self.month, self.day);
-    return d;
-};
-
-Calendar.prototype.getDay = function () {
-    return this.day + 1;
-};
-
-Calendar.prototype.getMonth = function () {
-    return this.month + 1;
-};
-
-Calendar.prototype.isFuture = function (day) {
-    var self = this;
-
-    var y = self.now.getFullYear();
-    var m = self.now.getMonth();
-    var d = self.now.getDate();
-
-    if (y > self.year)
-        return false;
-
-    if (y < self.year)
-        return true;
-
-    if (m > self.month)
-        return false;
-
-    if (m < self.month)
-        return true;
-
-    if (d > day)
-        return false;
-
-    if (d < day)
-        return true;
-
-    return false;
-};
-
-Calendar.prototype.isToday = function (date) {
-    var self = this;
-    return self.now.getFullYear() === self.year && self.now.getMonth() === self.month && self.now.getDate() === date;
-};
-
-Calendar.prototype.isSelected = function (date) {
-    var self = this;
-
-    var month = self.month;
-    var year = self.year;
-
-    var cb = function (selected) {
-        return selected.getFullYear() === year && selected.getMonth() === month && selected.getDate() === date;
-    };
-
-    return self.selected.find(cb) !== null;
-
-};
-
-Calendar.prototype.isIn = function (dB, dE, d) {
-    var n = utils.dateDiff(dB, d);
-    if (n < 0)
-        return false;
-
-    n = utils.dateDiff(d, dE);
-    if (n < 0)
-        return false;
-
-    return true;
-}
-
-Calendar.prototype.getYear = function () {
-    return this.year;
-};
-
-Calendar.prototype.nextMonth = function () {
-    var self = this;
-
-    self.month++;
-
-    if (self.month > 11) {
-        self.month = 0;
-        self.year++;
-    }
-
-    self.setDate(self.year, self.month, self.day);
-    return self;
-};
-
-Calendar.prototype.nextYear = function () {
-    var self = this;
-    self.year++;
-    self.setDate(self.year, self.month, self.day);
-    return self;
-};
-
-Calendar.prototype.prevMonth = function () {
-    var self = this;
-    self.month--;
-
-    if (self.month < 0) {
-        self.month = 11;
-        self.year--;
-    }
-
-    self.setDate(self.year, self.month, self.day);
-    return self;
-};
-
-Calendar.prototype.prevMonthDays = function () {
-    var self = this;
-
-    var m = self.month - 1;
-    var y = self.year;
-
-    if (m === -1) {
-        m = 11;
-        y--;
-    }
-
-    return utils.dateDays(y, m);
-};
-
-Calendar.prototype.nextMonthDays = function () {
-    var self = this;
-    var m = self.month + 1;
-    var y = self.year;
-
-    if (m === 12) {
-        m = 0;
-        y++;
-    }
-
-    return utils.dateDays(y, m);
-};
-
-Calendar.prototype.prevYear = function () {
-    var self = this;
-
-    self.year--;
-    self.setDate(self.year, self.month, self.day);
-
-    return self;
-};
-
-Calendar.prototype.render = function () {
-
-    var self = this;
-    var d = new Date(self.year, self.month, 1);
-    var today = d.getDay();
-    var output = { header: [], days: [], month: self.monthName[self.month], year: self.year };
-    var firstDay = self.firstDay;
-    var firstCount = 0;
-    var from = today - self.firstDay;
-
-    if (from < 0)
-        from = 7 + from;
-
-    while (firstCount++ < 7) {
-        output.header.push({ index: firstDay, name: self.dayName[firstDay] });
-        firstDay++;
-        if (firstDay > 6)
-            firstDay = 0;
-    }
-
-    var index = 0;
-    var indexEmpty = 0;
-    var count = 0;
-    var days = self.prevMonthDays() - from;
-
-    for (var i = 0; i < self.days + from; i++) {
-
-        count++;
-        var obj = { isToday: false, isSelected: false, isEmpty: false, isFuture: false, number: 0, index: count };
-
-        if (i >= from) {
-            index++;
-            obj.number = index;
-            obj.isSelected = self.isSelected(index);
-            obj.isToday = self.isToday(index);
-            obj.isFuture = self.isFuture(index);
-        } else {
-            indexEmpty++;
-            obj.number = days + indexEmpty;
-            obj.isEmpty = true;
-        }
-
-        output.days.push(obj);
-    }
-
-    indexEmpty = 0;
-    for (var i = count; i < 42; i++) {
-        count++;
-        indexEmpty++;
-        var obj = { isToday: false, isSelected: false, isEmpty: true, isFuture: false, number: indexEmpty, index: count };
-        output.days.push(obj);
-    }
-
-    self.emit("render", output);
-    return self;
-};
-
 var framework = new Framework();
 var utils = new Utils();
 
+$.ajaxSetup({
+    error: function (x, e) {
+        framework.emit('error', e, framework.url, 'xhr');
+    }
+});
