@@ -1,5 +1,7 @@
 "use strict";
 
+var LIMIT_HISTORY = 100;
+
 function Framework() {
     this.version = 101;
     this.config = {};
@@ -14,6 +16,10 @@ function Framework() {
     this.cache = new Cache(this);
     this.cache.init();
     this.resources['default'] = {};
+    this.debug = true;
+    this.isRefreshed = false;    
+    this.history = [];
+    this.model = null;
 };
 
 Framework.prototype.on = function(name, fn) {
@@ -106,6 +112,11 @@ Framework.prototype.partial = function(name, fn) {
     return self;
 };
 
+Framework.prototype.refresh = function() {
+    var self = this;
+    return self.location(self, true);
+};
+
 Framework.prototype._route = function(url) {
     url = url.toLowerCase();
 
@@ -163,7 +174,7 @@ Framework.prototype._routeCompare = function(url, route) {
     return true;
 };
 
-Framework.prototype.location = function(url) {
+Framework.prototype.location = function(url, isRefresh) {
 
     var index = url.indexOf('?');
     if (index !== -1)
@@ -175,6 +186,16 @@ Framework.prototype.location = function(url) {
     var path = self._route(url);
     var routes = [];
     var notfound = true;
+
+    self.isRefreshed = isRefresh || false;
+
+    if (!isRefresh) {
+        if (self.url.length > 0 && self.history[self.history.length - 1] !== self.url) {
+            self.history.push(self.url);
+            if (self.history.length > LIMIT_HISTORY)
+                self.history.shift();
+        }
+    }    
 
     for (var i = 0; i < self.routes.length; i++) {
         var route = self.routes[i];
@@ -221,6 +242,13 @@ Framework.prototype.location = function(url) {
 
     if (notfound)
         self.status(404);
+};
+
+Framework.prototype.back = function() {
+    var self = this;
+    var url = self.history.pop() || '/'; 
+    self.url = '';
+    self.redirect(url, true);
 };
 
 Framework.prototype.status = function(code) {
@@ -378,7 +406,7 @@ Framework.prototype.validate = function(model, properties, resource, prefix) {
     return error;
 };
 
-Framework.prototype.redirect = function(url) {
+Framework.prototype.redirect = function(url, model) {
     var self = this;
 
     if (!history.pushState) {
@@ -387,7 +415,8 @@ Framework.prototype.redirect = function(url) {
     }
 
     history.pushState(null, null, url);
-    self.location(url);
+    self.model = model || null;
+    self.location(url, false, isBack);
 
     return self;
 };
@@ -409,7 +438,6 @@ Framework.prototype.template = function(template, model, repository) {
 };
 
 Framework.prototype.onValidation = null;
-Framework.prototype.onPrefix = null;
 
 Framework.prototype.cookie = {
     read: function (name) {
@@ -940,211 +968,6 @@ Utils.prototype.fragment = function (max) {
     return utils.path(builder.join('/'));
 };
 
-Utils.prototype.JtO = function (d) {
-    if (typeof (d) === 'object')
-        return d;
-    if (d == null || d.length < 2) return null;
-    try {
-        return $.evalJSON(d);
-    } catch (e) {
-        return null;
-    }
-};
-
-Utils.prototype.isChecked = function (o) {
-    var obj = $(o);
-    if (obj.length === 0)
-        return false;
-    return obj.get(0).checked;
-};
-
-Utils.prototype.isDisabled = function (o) {
-    var obj = $(o);
-    if (obj.length === 0)
-        return false;
-    return obj.get(0).disabled;
-};
-
-Utils.prototype.disabled = function (o, bool) {
-    return $(o).prop({ disabled: bool });
-};
-
-Utils.prototype.checked = function (o, bool) {
-    return $(o).prop({ checked: bool });
-};
-
-Utils.prototype.scroll = function (y, s) {
-    $('html,body').animate({ scrollTop: y }, s || 300);
-};
-
-Utils.prototype.getValue = function (o, isNumber) {
-    var obj = $(o);
-
-    if (obj.length === 0)
-        return null;
-
-    obj = obj.get(0);
-
-    var m = obj.nodeName.toLowerCase();
-    var v = null;
-
-    if (m === 'select-one' || m === 'select') {
-        if (obj.length == 0)
-            return null;
-
-        v = obj[obj.selectedIndex];
-        return isNumber ? v.value.parseInt() : v.value;
-    }
-
-    return isNumber ? obj.value.parseInt() : obj.value;
-};
-
-Utils.prototype.getText = function (o) {
-
-    var obj = $(o);
-
-    if (obj.length === 0)
-        return '';
-
-    obj = obj.get(0);
-
-    if (obj.length === 0)
-        return '';
-
-    return obj[obj.selectedIndex].text;
-};
-
-Utils.prototype.getIndex = function (o) {
-    var obj = $(o);
-
-    if (obj.length === 0)
-        return 0;
-
-    obj = obj.get(0);
-    return obj.selectedIndex;
-};
-
-Utils.prototype.setIndex = function (o, i) {
-
-    var obj = $(o);
-
-    if (obj.length === 0)
-        return obj;
-
-    obj = obj.get(0);
-
-    var m = obj.nodeName.toLowerCase();
-
-    if (m === 'select-one' || m === 'select')
-        obj.selectedIndex = i;
-
-    return $(obj);
-};
-
-Utils.prototype.setValue = function (o, v) {
-    var obj = $(o);
-
-    if (obj.length === 0)
-        return el;
-
-    if (v === null)
-        return el;
-
-    var el = obj;
-    obj = obj.get(0);
-
-    var m = obj.nodeName.toLowerCase();
-    if (m === 'select-one' || m === 'select') {
-        var l = obj.length;
-        for (var i = 0; i < l; i++) {
-            if (obj[i].value == v) {
-                obj[i].selected = true;
-                return el;
-            }
-        }
-        return el;
-    }
-
-    var type = obj.type.toString().toLowerCase();
-    if (type === 'checkbox' || type === 'radio')
-        obj.checked = v;
-    else
-        obj.value = v;
-
-    return el;
-};
-
-Utils.prototype.setValues = function (f, h) {
-
-    f = $(f);
-
-    if (f.length === 0)
-        return f;
-
-    var obj = f;
-    f = f.get(0);
-
-    if (f.nodeName.toLowerCase() === 'form') {
-        for (var i = 0; i < f.length; i++) {
-            var el = f[i];
-            h.call(el, el, i);
-        }
-        return obj;
-    }
-
-    var index = 0;
-
-    $(f).find('input,select,textarea').each(function () {
-        h.call(this, this, index++);
-    });
-
-    return obj;
-};
-
-Utils.prototype.optionClear = function (o) {
-
-    var obj = $(o);
-    if (obj.length === 0)
-        return obj;
-
-    obj.get(0).length = 0;
-    return obj;
-};
-
-Utils.prototype.optionCreate = function (el, text, value, callback) {
-    var obj = $(el);
-    if (obj.length === 0)
-        return obj;
-
-    var option = document.createElement('OPTION');
-    option.text = text;
-    option.value = value;
-    callback && callback.call(option, option);
-    obj.get(0).options.add(option);
-
-    return obj;
-};
-
-Utils.prototype.confirm = function (b, message) {
-
-    if (!b) {
-        window.onbeforeunload = null;
-        return this;
-    }
-
-    if (window.onbeforeunload != null)
-        return;
-
-    window.onbeforeunload = function (e) {
-        e = e || window.event;
-
-        if (e)
-            e.returnValue = message;
-
-        return message;
-    };
-};
-
 Utils.prototype.pluralize = function (i, a, b, c) {
     if (i === 1)
         return b;
@@ -1186,7 +1009,6 @@ Utils.prototype.parseFloat = function(obj, def) {
     var str = type !== 'string' ? obj.toString() : obj;
     return str.parseFloat(def);
 };
-
 
 /*
     Async class
