@@ -6,7 +6,7 @@ framework.route('/', view_homepage);
 framework.route('/*', view_panel, ['header']);
 framework.route('/products/', view_products);
 
-function view_homepage() {	
+function view_homepage() {
 	var self = this;
 	console.log('homepage');
 };

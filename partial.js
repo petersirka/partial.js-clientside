@@ -1,33 +1,127 @@
 "use strict";
 
 var LIMIT_HISTORY = 100;
+var LIMIT_HISTORY_ERROR = 100;
 
 var _escapeable = /["\\\x00-\x1f\x7f-\x9f]/g;
 var _meta = {'\b': '\\b', '\t': '\\t', '\n': '\\n', '\f': '\\f', '\r': '\\r', '"': '\\"', '\\': '\\\\' };
 var _selector = { '#': 'getElementById', '.': 'getElementsByClassName', '@': 'getElementsByName', '=': 'getElementsByTagName', '*': 'querySelectorAll' };
 
-function Framework() {
-    this.version = 101;
-    this.config = {};
-    this.routes = [];
-    this.events = {};
-    this.global = {};
-    this.params = {};
-    this.repository = {};
-    this.resources = {};
-    this.locked = {};
-    this.partials = {};
-    this.url = '';
-    this.cache = new Cache(this);
-    this.cache.init();
-    this.resources['default'] = {};
-    this.debug = true;
-    this.isRefreshed = false;
-    this.history = [];
-    this.model = null;
+var DOM = {};
+var utils = {};
+
+var framework = {
+    version: 101,
+    routes: [],
+    history: [],
+    errors: [],
+    config: {},
+    events: {},
+    global: {},
+    params: {},
+    locked: {},
+    templates: {},
+    partials: {},
+    repository: {},
+    resources: {},
+    url: '',
+    cache: null,
+    model: null,
+    isReady: false,
+    isRefreshed: false,
+    isSupportHistory: typeof(history.pushState) !== 'undefined'
 };
 
-Framework.prototype.on = function(name, fn) {
+DOM.ready = function(fn) {
+
+    var add = document.addEventListener || document.attachEvent;
+    var rem =  document.removeEventListener || document.detachEvent;
+    var name = document.addEventListener ? 'DOMContentLoaded' : 'onreadystatechange';
+
+    var evt = function evt() {
+        rem.call(document, name, evt, false);
+        fn();
+    };
+
+    add.call(document, name, evt, false);
+};
+
+DOM.selector = function(query) {
+    var regex = /[=#@.*]/.exec(query)[0];
+    return (document[_selector[regex]](query.split(regex)[1]));
+};
+
+DOM.content = function(query, content, isText) {
+    var el = DOM.selector(query);
+
+    if (el === null)
+        return false;
+
+    if (typeof(el.length) === 'undefined') {
+        if (isText)
+            el.innerText = content;
+        else
+            el.innerHTML = content;
+        return true;
+    }
+
+    for (var i = 0; i < el.length; i++) {
+        if (isText)
+            el.innerText = content;
+        else
+            el.innerHTML = content;
+    }
+
+    return el.length > 0;
+};
+
+DOM.bind = function(el, type, cb) {
+
+    if (typeof(el) === 'string')
+        return DOM.bind(DOM.selector(el), type, cb);
+
+    if (typeof(el.screen) === 'undefined') {
+        if (typeof(el.length) !== 'undefined') {
+
+            for (var i = 0; i < el.length; i++)
+                DOM.bind(el[i], type, cb);
+
+            return el;
+        };
+    }
+
+    if (el.addEventListener)
+        el.addEventListener(type, cb, false);
+    else
+        el.attachEvent('on' + type, cb);
+
+    return el;
+};
+
+DOM.unbind = function(el, type, cb) {
+
+    if (typeof(el) === 'string')
+        return DOM.unbind(DOM.selector(el), type, cb);
+
+    if (typeof(el.screen) === 'undefined') {
+        if (typeof(el.length) !== 'undefined') {
+
+            for (var i = 0; i < el.length; i++)
+                DOM.unbind(el[i], type, cb);
+
+            return el;
+        };
+    }
+
+    if(el.removeEventListener)
+        el.removeEventListener(type, cb, false);
+    else
+        el.detachEvent('on' + type, cb);
+
+    return el;
+};
+
+framework.on = function(name, fn) {
     var self = this;
 
     var e = self.events[name];
@@ -41,7 +135,7 @@ Framework.prototype.on = function(name, fn) {
     return self;
 };
 
-Framework.prototype.emit = function(name) {
+framework.emit = function(name) {
 
     var self = this;
     var events = self.events[name] || [];
@@ -58,7 +152,7 @@ Framework.prototype.emit = function(name) {
     });
 };
 
-Framework.prototype.route = function(url, fn, partial) {
+framework.route = function(url, fn, partial) {
 
     var self = this;
     var priority = url.count('/') + (url.indexOf('*') === -1 ? 0 : 10);
@@ -88,7 +182,7 @@ Framework.prototype.route = function(url, fn, partial) {
     return self;
 };
 
-Framework.prototype.partial = function(name, fn) {
+framework.partial = function(name, fn) {
     var self = this;
 
     if (typeof(fn) === 'undefined') {
@@ -117,18 +211,18 @@ Framework.prototype.partial = function(name, fn) {
     return self;
 };
 
-Framework.prototype.refresh = function() {
+framework.refresh = function() {
     var self = this;
     return self.location(self, true);
 };
 
-Framework.prototype._route = function(url) {
+framework._route = function(url) {
     url = url.toLowerCase();
 
-    if (url[0] === '/')
+    if (url.charIndex(0) === '/')
         url = url.substring(1);
 
-    if (url[url.length - 1] === '/')
+    if (url.charIndex(url.length - 1) === '/')
         url = url.substring(0, url.length - 1);
 
     var arr = url.split('/');
@@ -138,7 +232,7 @@ Framework.prototype._route = function(url) {
     return arr;
 };
 
-Framework.prototype._routeParam = function(routeUrl, route) {
+framework._routeParam = function(routeUrl, route) {
     var arr = [];
 
     if (!route || !routeUrl)
@@ -155,7 +249,7 @@ Framework.prototype._routeParam = function(routeUrl, route) {
     return arr;
 };
 
-Framework.prototype._routeCompare = function(url, route) {
+framework._routeCompare = function(url, route) {
 
     var skip = url.length === 1 && url[0] === '/';
 
@@ -166,7 +260,7 @@ Framework.prototype._routeCompare = function(url, route) {
         if (typeof(value) === 'undefined')
             return false;
 
-        if (!skip && value[0] === '{')
+        if (!skip && value.charIndex(0) === '{')
             continue;
 
         if (value === '*')
@@ -179,12 +273,13 @@ Framework.prototype._routeCompare = function(url, route) {
     return true;
 };
 
-Framework.prototype.location = function(url, isRefresh) {
+framework.location = function(url, isRefresh) {
 
     var index = url.indexOf('?');
     if (index !== -1)
         url = url.substring(0, index);
 
+    url = utils.prepareUrl(url);
     url = utils.path(url);
 
     var self = this;
@@ -212,6 +307,7 @@ Framework.prototype.location = function(url, isRefresh) {
     }
 
     var isError = false;
+    var error = '';
 
     self.url = url;
     self.repository = {};
@@ -230,6 +326,7 @@ Framework.prototype.location = function(url, isRefresh) {
             });
         } catch (ex) {
             isError = true;
+            error += (error !== '' ? '\n' : '') + ex.toString();
             self.emit('error', ex, url, 'execute - partial');
         }
 
@@ -238,31 +335,34 @@ Framework.prototype.location = function(url, isRefresh) {
             route.fn.apply(self, self._routeParam(path, route));
         } catch (ex) {
             isError = true;
+            error += (error !== '' ? '\n' : '') + ex.toString();
             self.emit('error', ex, url, 'execute - route');
         }
+
     });
 
     if (isError)
-        self.status(500);
+        self.status(500, error);
 
     if (notfound)
-        self.status(404);
+        self.status(404, 'not found');
 };
 
-Framework.prototype.back = function() {
+framework.back = function() {
     var self = this;
     var url = self.history.pop() || '/';
     self.url = '';
     self.redirect(url, true);
-};
-
-Framework.prototype.status = function(code) {
-    var self = this;
-    self.emit('status', code || 404);
     return self;
 };
 
-Framework.prototype.resource = function(name, key) {
+framework.status = function(code, message) {
+    var self = this;
+    self.emit('status', code || 404, message);
+    return self;
+};
+
+framework.resource = function(name, key) {
 
     if (typeof(key) === 'undefined') {
         key = name;
@@ -273,7 +373,7 @@ Framework.prototype.resource = function(name, key) {
     return resource[key] || '';
 };
 
-Framework.prototype.post = function(url, data, cb, key, expire) {
+framework.POST = function(url, data, cb, key, expire) {
 
     var self = this;
 
@@ -308,7 +408,7 @@ Framework.prototype.post = function(url, data, cb, key, expire) {
             var d = xhr.responseText;
 
             if (d.isJSON())
-                d = d.parseJSON();
+                d = d.JSON();
 
             self.emit('post', false, url, d);
 
@@ -319,7 +419,7 @@ Framework.prototype.post = function(url, data, cb, key, expire) {
             cb(d);
         };
 
-        xhr.send(serializeForm(data));
+        xhr.send(utils.serialize(data));
     });
 
     if (!isCache) {
@@ -336,7 +436,7 @@ Framework.prototype.post = function(url, data, cb, key, expire) {
     return true;
 };
 
-Framework.prototype.get = function(url, cb, key, expire) {
+framework.GET = function(url, cb, key, expire) {
 
     var self = this;
 
@@ -368,7 +468,7 @@ Framework.prototype.get = function(url, cb, key, expire) {
             var d = xhr.responseText;
 
             if (d.isJSON())
-                d = d.parseJSON();
+                d = d.JSON();
 
             self.emit('get', false, url, d);
 
@@ -405,7 +505,7 @@ Framework.prototype.get = function(url, cb, key, expire) {
     @resource {Function} :: function(key) return {String}
     return {ErrorBuilder}
 */
-Framework.prototype.validate = function(model, properties, resource, prefix) {
+framework.validate = function(model, properties, resource, prefix) {
 
     var error = [];
     var self = this;
@@ -456,29 +556,35 @@ Framework.prototype.validate = function(model, properties, resource, prefix) {
     return error;
 };
 
-Framework.prototype.redirect = function(url, model) {
+framework.redirect = function(url, model) {
     var self = this;
 
-    if (!history.pushState) {
-        window.location.href = url;
+    if (!self.isSupportHistory) {
+        window.location.href = '/#' + utils.path(url);
+        self.model = model || null;
         return self;
     }
 
     history.pushState(null, null, url);
     self.model = model || null;
-    self.location(url, false, isBack);
+    self.location(url, false);
 
     return self;
 };
 
-Framework.prototype.template = function(template, model, repository) {
+/*
+    Register template
+    @name {String}
+    @template {String} or {String DOM selector}
+    return {Framework}
+*/
+framework.template = function(name, template) {
+
     var self = this;
 
     if (template.indexOf('{') === -1) {
-        var el = DOM_selector(template);
-
+        var el = DOM.selector(template);
         if (el !== null) {
-
             if (el.length > 0)
                 el = el[0];
 
@@ -490,13 +596,41 @@ Framework.prototype.template = function(template, model, repository) {
         }
     }
 
-    var parser = new Template(self, template, model, repository);
-    return parser.render();
+    self.templates[name] = template;
+    self.cache.remove('template.' + name);
+    return self;
 };
 
-Framework.prototype.onValidation = null;
+framework.render = function(name, model, repository) {
+    var self = this;
+    var template = new Template(self, name, model, repository);
+    return template.render();
+};
 
-Framework.prototype.cookie = {
+framework.log = function() {
+    var self = this;
+    self.onLog.apply(self, arguments);
+    return self;
+};
+
+framework.onValidation = null;
+
+framework.onLog = function() {
+    var self = this;
+
+    if (!console || !console.log || !console.log.apply)
+        return self;
+
+    var arr = [];
+
+    for (var i = 0; i < arguments.length; i++)
+        arr.push(arguments[i]);
+
+    console.log.apply(console, arr);
+    return self;
+};
+
+framework.cookie = {
     read: function (name) {
         var arr = document.cookie.split(';');
         for (var i = 0; i < arr.length; i++) {
@@ -505,7 +639,7 @@ Framework.prototype.cookie = {
                 c = c.substring(1);
             var v = c.split('=');
             if (v.length > 1) {
-                if (v[0] == name)
+                if (v[0] === name)
                     return v[1];
             }
         }
@@ -527,7 +661,7 @@ Framework.prototype.cookie = {
     }
 };
 
-Framework.prototype._params = function() {
+framework._params = function() {
 
     var self = this;
     var data = {};
@@ -703,9 +837,9 @@ Cache.prototype.removeAll = function(search) {
     @repository {Object}
     return {Template}
 */
-function Template(framework, template, model, repository) {
+function Template(framework, name, model, repository) {
 
-    this.template = template;
+    this.name = name;
     this.model = model;
     this.repository = repository || null;
     this.cache = framework.cache;
@@ -771,7 +905,6 @@ Template.prototype.parse = function(html, isRepository) {
 
             format = name.substring(index + 1, name.length - 1).trim();
             name = name.substring(1, index);
-
             var pluralize = parsePluralize(format);
             if (pluralize.length === 0) {
                 if (format.indexOf('#') === -1) {
@@ -792,7 +925,7 @@ Template.prototype.parse = function(html, isRepository) {
         else
             name = name.substring(1, name.length - 1);
 
-        if (name[0] === '!') {
+        if (name.charIndex(0) === '!') {
             name = name.substring(1);
             isEncode = false;
         }
@@ -838,17 +971,23 @@ Template.prototype.parse = function(html, isRepository) {
 
     try
     {
-        return { generator: eval('(function(prop){return ' + fn.join('+') + ';})'), beg: beg, end: end, property: property, repositoryBeg: repositoryBeg, repositoryEnd: repositoryEnd };
+        //return { generator: new Function('generator', ) eval('(function(prop){return ' + fn.join('+') + ';})'), beg: beg, end: end, property: property, repositoryBeg: repositoryBeg, repositoryEnd: repositoryEnd };
+        return { generator: new Function('prop', 'return ' + fn.join('+')), beg: beg, end: end, property: property, repositoryBeg: repositoryBeg, repositoryEnd: repositoryEnd };
     } catch (ex) {
         self.framework.emit('error', ex, self.framework.url, 'Template');
     }
 };
 
+/*
+    Internal function
+    @value {String}
+    return {String}
+*/
 function parseCondition(value) {
 
     value = value.trim();
 
-    var condition = value[0];
+    var condition = value.charIndex(0);
     if (condition !== '"' && condition !== '\'')
         return '';
 
@@ -865,11 +1004,16 @@ function parseCondition(value) {
     return "'{0}','{1}'".format(a, value.substring(index + 1, value.length - 1).replace(/\'/g, "\\'"));
 };
 
+/*
+    Internal function
+    @value {String}
+    return {String}
+*/
 function parsePluralize(value) {
 
     value = value.trim();
 
-    var condition = value[0];
+    var condition = value.substring(0, 1);
     if (condition !== '"' && condition !== '\'')
         return '';
 
@@ -911,14 +1055,17 @@ function parsePluralize(value) {
 Template.prototype.load = function() {
 
     var self = this;
-    var id = self.template.hash();
 
-    var generator = self.cache.read('template.' + id);
+    var generator = self.cache.read('template.' + self.name);
     if (generator !== null)
         return generator;
 
-    generator = self.parse(self.template);
-    self.cache.write('template.' + id, generator, new Date().add('m', 5));
+    var template = self.framework.templates[self.name] || '';
+    if (template.length === 0)
+        return null;
+
+    generator = self.parse(template);
+    self.cache.write('template.' + self.name, generator, new Date().add('m', 5));
     return generator;
 };
 
@@ -930,8 +1077,8 @@ Template.prototype.load = function() {
 Template.prototype.render = function() {
 
     var self = this;
-    var generator = self.load();
 
+    var generator = self.load();
     if (generator === null)
         return '';
 
@@ -1012,12 +1159,15 @@ function template_compile_eval(generator, model, indexer) {
         params.push(val);
     }
 
-    return generator.generator.call(null, params);
+    return generator.generator.call(this, params);
 }
 
-function Utils() {};
-
-Utils.prototype.GUID = function(max) {
+/*
+    Create UniqueIdentifier
+    @max {Number} :: optional, default 40
+    return {String}
+*/
+utils.GUID = function(max) {
 
     max = max || 40;
 
@@ -1032,26 +1182,39 @@ Utils.prototype.GUID = function(max) {
     return str.substring(0, max);
 };
 
-Utils.prototype.path = function (s, d) {
+/*
+    Get clean path
+    @url {String}
+    @d {String} :: delimiter, optional, default /
+    return {String}
+*/
+utils.path = function (url, d) {
+
     if (typeof (d) === 'undefined')
         d = '/';
-    var p = s.substring(s.length - 1, s.length);
-    if (p !== d)
-        s += d;
-    return s;
+
+    var index = url.indexOf('?');
+    var params = '';
+
+    if (index !== -1) {
+        params = url.substring(index);
+        url = url.substring(0, index);
+    }
+
+    var c = url.charIndex(url.length - 1);
+    if (c !== d)
+        url += d;
+
+    return url + params;
 };
 
-Utils.prototype.pluralize = function (i, a, b, c) {
-    if (i === 1)
-        return b;
+/*
+    Get object keys
+    @obj {Object}
+    return {Array}
+*/
+utils.keys = function(obj) {
 
-    if (i > 1 && i < 5)
-        return c;
-
-    return a;
-};
-
-Utils.prototype.keys = function(obj) {
     if (typeof(Object.keys) !== 'undefined')
         return Object.keys(obj);
 
@@ -1069,7 +1232,7 @@ Utils.prototype.keys = function(obj) {
     @def {Number}
     return {Number}
 */
-Utils.prototype.parseInt = function(obj, def) {
+utils.parseInt = function(obj, def) {
     var type = typeof(obj);
 
     if (type === 'undefined')
@@ -1085,7 +1248,7 @@ Utils.prototype.parseInt = function(obj, def) {
     @def {Number}
     return {Number}
 */
-Utils.prototype.parseFloat = function(obj, def) {
+utils.parseFloat = function(obj, def) {
     var type = typeof(obj);
 
     if (type === 'undefined')
@@ -1109,74 +1272,22 @@ function quoteString(string) {
     return '"' + string + '"';
 };
 
-function DOM_selector(query) {
-    var regex = /[=#@.*]/.exec(query)[0];
-    return (document[_selector[regex]](query.split(regex)[1]));
-};
 
-function DOM_content(query, html) {
-    var el = DOM_selector(query);
-
-    if (el === null)
-        return false;
-
-    if (typeof(el.length) === 'undefined') {
-        el.innerHTML = html;
-        return true;
-    }
-
-    for (var i = 0; i < el.length; i++)
-        el.innerHTML = html;
-
-    return el.length > 0;
-};
-
-function DOM_bind(el, type, cb) {
-
-    if (typeof(el) === 'string')
-        return DOM_bind(DOM_selector(el), type, cb);
-
-    if (typeof(el.length) !== 'undefined') {
-
-        for (var i = 0; i < el.length; i++)
-            DOM_bind(el[i], type, cb);
-
-        return el;
-    };
-
-    if (el.addEventListener)
-        el.addEventListener(type, cb, false);
-    else
-        el.attachEvent('on' + type, cb);
-
-    return el;
-};
-
-function DOM_unbind(el, type, cb) {
-
-    if (typeof(el) === 'string')
-        return DOM_unbind(DOM_selector(el), type, cb);
-
-    if (el.length > 0) {
-        for (var i = 0; i < el.length; i++)
-            DOM_unbind(el[i], type, cb);
-        return el;
-    };
-
-    if(el.removeEventListener)
-        el.removeEventListener(type, cb, false);
-    else
-        el.detachEvent('on' + type, cb);
-
-    return el;
-};
-
-function serializeForm(obj) {
+/*
+    Object serializer
+    @obj {Object}
+    @format {String} :: optional, default empty (example: JSON)
+    return {String}
+*/
+utils.serialize = function(obj, format) {
 
     var type = typeof(obj);
 
     if (type === 'function')
-        return serializeForm(obj());
+        return utils.serialize(obj(), format);
+
+    if (format === 'json' || format === 'JSON')
+        return utils.JSON(obj);
 
     if (type !== 'object')
         return (obj || '').toString();
@@ -1199,7 +1310,12 @@ function serializeForm(obj) {
     return buffer.join('&');
 };
 
-function serializeJSON(o) {
+/*
+    Object to JSON
+    @o {Object}
+    return {String}
+*/
+utils.JSON = function(o) {
 
     if (typeof (JSON) == 'object' && JSON.stringify)
         return JSON.stringify(o);
@@ -1245,7 +1361,7 @@ function serializeJSON(o) {
 
         var ret = [];
         for (var i = 0; i < l; i++)
-            ret.push(serializeJSON(o[i]) || 'null');
+            ret.push(utils.JSON(o[i]) || 'null');
 
         return '[' + ret.join(',') + ']';
     }
@@ -1266,11 +1382,25 @@ function serializeJSON(o) {
         if (typeof o[k] === 'function')
             continue;
 
-        var val = serializeJSON(o[k]);
+        var val = utils.JSON(o[k]);
         pairs.push(name + ':' + val);
     }
 
     return '{' + pairs.join(', ') + '}';
+};
+
+/*
+    Prepare Hashtag url
+    @url {String}
+    return {String}
+*/
+utils.prepareUrl = function(url) {
+
+    var index = url.indexOf('#');
+    if (index !== -1)
+        return url.substring(index + 1);
+
+    return url;
 };
 
 /*
@@ -1531,11 +1661,15 @@ Date.prototype.format = function (format) {
     return format.replace(/yyyy/g, yyyy).replace(/yy/g, yy).replace(/MM/g, MM).replace(/M/g, M).replace(/dd/g, dd).replace(/d/g, d).replace(/HH/g, HH).replace(/H/g, H).replace(/hh/g, hh).replace(/h/g, h).replace(/mm/g, mm).replace(/m/g, m).replace(/ss/g, ss).replace(/s/g, ss).replace(/a/g, a);
 };
 
+String.prototype.charIndex = function(index) {
+    return this.toString().substring(index, index + 1);
+};
+
 String.prototype.parseDate = function () {
 
     var str = this.toString();
 
-    if (str[0] === '/' && str[str.length - 1] === '/')
+    if (str.charIndex(0) === '/' && str.charIndex(str.length - 1) === '/')
         return new Date(parseInt(str.substr(6)));
 
     var arr = this.split(' ');
@@ -1678,8 +1812,9 @@ String.prototype.maxLength = function (max, chars) {
 };
 
 String.prototype.isJSON = function () {
-    var a = this[0];
-    var b = this[this.length - 1];
+    var str = this.toString();
+    var a = str.substring(0, 1);
+    var b = str.substring(str.length - 2, str.length - 1);
     return (a === '"' && b === '"') || (a === '[' && b === ']') || (a === '{' && b === '}');
 };
 
@@ -1735,7 +1870,7 @@ String.prototype.parseFloat = function (def) {
     return num;
 };
 
-String.prototype.parseJSON = function() {
+String.prototype.JSON = function() {
     var src = this;
     if (typeof (JSON) == 'object' && JSON.parse)
         return JSON.parse(src);
@@ -1935,7 +2070,7 @@ Number.prototype.format = function (format) {
 */
 Number.prototype.pluralize = function(zero, one, few, other) {
 
-    var num = this;
+    var num = parseInt(this);
     var value = '';
 
     if (num === 0)
@@ -1958,7 +2093,7 @@ Number.prototype.pluralize = function(zero, one, few, other) {
 };
 
 Number.prototype.condition = function(ifTrue, ifFalse) {
-    return (this % 2 === 0 ? ifTrue : ifFalse) || '';
+    return (parseInt(this) % 2 === 0 ? ifTrue : ifFalse) || '';
 };
 
 Boolean.prototype.condition = function(ifTrue, ifFalse) {
@@ -2043,5 +2178,56 @@ if (!Array.prototype.indexOf) {
     };
 }
 
-var framework = new Framework();
-var utils = new Utils();
+if (!Object.prototype.keys)
+    Object.prototype.keys = utils.keys;
+
+DOM.bind(window, 'hashchange', function() {
+    if (!framework.isReady)
+        return;
+    var url = window.location.hash || '';
+    if (url.length === 0)
+        url = window.location.pathname;
+    framework.location(utils.path(url));
+});
+
+if (navigator.appVersion.indexOf('MSIE 7.') !== -1) {
+    setInterval(function() {
+        if (!framework.isReady)
+            return;
+
+        var url = window.location.hash || '';
+        if (url.length === 0)
+            url = window.location.pathname;
+
+        url = utils.path(url);
+
+        if (url !== framework.url)
+            framework.location(url);
+
+    }, 500);
+}
+
+framework.cache = new Cache(framework);
+framework.cache.init();
+framework.resources['default'] = {};
+framework.config.debug = false;
+
+framework.on('error', function (err, url, name) {
+    var self = this;
+    self.errors.push({ error: err, url: url, name: name, date: new Date() });
+    if (self.errors.length > LIMIT_HISTORY_ERROR)
+        self.errors.shift();
+});
+
+DOM.ready(function() {
+    var url = window.location.hash || '';
+    if (url.length === 0)
+        url = window.location.pathname;
+
+    framework.isReady = true;
+
+    if (typeof(framework.events['ready']) === 'undefined')
+        framework.location(utils.path(utils.prepareUrl(url)));
+    else
+        framework.emit('ready', utils.path(utils.prepareUrl(url)));
+});
