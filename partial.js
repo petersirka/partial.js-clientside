@@ -6,6 +6,7 @@ var LIMIT_HISTORY_ERROR = 100;
 var _escapeable = /["\\\x00-\x1f\x7f-\x9f]/g;
 var _meta = {'\b': '\\b', '\t': '\\t', '\n': '\\n', '\f': '\\f', '\r': '\\r', '"': '\\"', '\\': '\\\\' };
 var _selector = { '#': 'getElementById', '.': 'getElementsByClassName', '@': 'getElementsByName', '=': 'getElementsByTagName', '*': 'querySelectorAll' };
+var _handlers = {};
 
 var DOM = {};
 var utils = {};
@@ -75,48 +76,55 @@ DOM.content = function(query, content, isText) {
     return el.length > 0;
 };
 
-DOM.bind = function(el, type, cb) {
+DOM.bind = function(el, type, name, cb) {
 
     if (typeof(el) === 'string')
-        return DOM.bind(DOM.selector(el), type, cb);
+        return DOM.bind(DOM.selector(el), type, name, cb);
 
     if (typeof(el.screen) === 'undefined') {
         if (typeof(el.length) !== 'undefined') {
 
             for (var i = 0; i < el.length; i++)
-                DOM.bind(el[i], type, cb);
+                DOM.bind(el[i], type, name, cb);
 
             return el;
         };
     }
 
+    _handlers[name] = cb;
+
     if (el.addEventListener)
-        el.addEventListener(type, cb, false);
+        el.addEventListener(type, _handlers[name].bind(el), false);
     else
-        el.attachEvent('on' + type, cb);
+        el.attachEvent('on' + type, _handlers[name].bind(el));
 
     return el;
 };
 
-DOM.unbind = function(el, type, cb) {
+DOM.unbind = function(el, type, name) {
 
     if (typeof(el) === 'string')
-        return DOM.unbind(DOM.selector(el), type, cb);
+        return DOM.unbind(DOM.selector(el), type, name);
 
     if (typeof(el.screen) === 'undefined') {
         if (typeof(el.length) !== 'undefined') {
 
             for (var i = 0; i < el.length; i++)
-                DOM.unbind(el[i], type, cb);
+                DOM.unbind(el[i], type, name);
 
             return el;
         };
     }
 
+    var fn = _handlers[name];
+
+    if (typeof(fn) === 'undefined')
+        return el;
+
     if(el.removeEventListener)
-        el.removeEventListener(type, cb, false);
+        el.removeEventListener(type, fn, false);
     else
-        el.detachEvent('on' + type, cb);
+        el.detachEvent('on' + type, fn);
 
     return el;
 };
@@ -560,7 +568,7 @@ framework.redirect = function(url, model) {
     var self = this;
 
     if (!self.isSupportHistory) {
-        window.location.href = '/#' + utils.path(url);
+        window.location.href = '/#!' + utils.path(url);
         self.model = model || null;
         return self;
     }
@@ -1396,9 +1404,9 @@ utils.JSON = function(o) {
 */
 utils.prepareUrl = function(url) {
 
-    var index = url.indexOf('#');
+    var index = url.indexOf('#!');
     if (index !== -1)
-        return url.substring(index + 1);
+        return url.substring(index + 2);
 
     return url;
 };
@@ -2175,6 +2183,18 @@ if (!Array.prototype.indexOf) {
                 return i;
         }
         return -1;
+    };
+}
+
+// https://developer.mozilla.org/en-US/docs/JavaScript/Reference/Global_Objects/Function/bind
+if (!Function.prototype.bind) {
+    Function.prototype.bind = function (oThis) {
+        if (typeof this !== 'function')
+            throw new TypeError("Function.prototype.bind - what is trying to be bound is not callable");
+        var aArgs = Array.prototype.slice.call(arguments, 1), fToBind = this, fNOP = function () {}, fBound = function () { return fToBind.apply(this instanceof fNOP && oThis ? this : oThis, aArgs.concat(Array.prototype.slice.call(arguments))); };
+        fNOP.prototype = this.prototype;
+        fBound.prototype = new fNOP();
+        return fBound;
     };
 }
 
