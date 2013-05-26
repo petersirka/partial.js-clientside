@@ -28,9 +28,11 @@ var framework = {
     url: '',
     cache: null,
     model: null,
+    isFirst: true,
     isReady: false,
     isRefreshed: false,
-    isSupportHistory: typeof(history.pushState) !== 'undefined'
+    isSupportHistory: typeof(history.pushState) !== 'undefined',
+    count: 0
 };
 
 DOM.ready = function(fn) {
@@ -76,22 +78,30 @@ DOM.content = function(query, content, isText) {
     return el.length > 0;
 };
 
-DOM.bind = function(el, type, name, cb) {
+/*
+    Unbind event from element
+    @el {HTMLElement or String(Selector)}
+    @type {String} :: name of event
+    @name {String} :: bind name
+    @fn {Function}
+    return {HTMLElement}
+*/
+DOM.bind = function(el, type, name, fn) {
 
     if (typeof(el) === 'string')
-        return DOM.bind(DOM.selector(el), type, name, cb);
+        return DOM.bind(DOM.selector(el), type, name, fn);
 
     if (typeof(el.screen) === 'undefined') {
         if (typeof(el.length) !== 'undefined') {
 
             for (var i = 0; i < el.length; i++)
-                DOM.bind(el[i], type, name, cb);
+                DOM.bind(el[i], type, name, fn);
 
             return el;
         };
     }
 
-    _handlers[name] = cb;
+    _handlers[name] = fn;
 
     if (el.addEventListener)
         el.addEventListener(type, _handlers[name].bind(el), false);
@@ -101,6 +111,13 @@ DOM.bind = function(el, type, name, cb) {
     return el;
 };
 
+/*
+    Unbind event from element
+    @el {HTMLElement or String(Selector)}
+    @type {String} :: name of event
+    @name {String} :: function name
+    return {HTMLElement}
+*/
 DOM.unbind = function(el, type, name) {
 
     if (typeof(el) === 'string')
@@ -129,6 +146,12 @@ DOM.unbind = function(el, type, name) {
     return el;
 };
 
+/*
+    Capture event
+    @name {String}
+    @fn {Function}
+    return {Framework}
+*/
 framework.on = function(name, fn) {
     var self = this;
 
@@ -143,6 +166,11 @@ framework.on = function(name, fn) {
     return self;
 };
 
+/*
+    Emit Event
+    @name {String}
+    return {Framework}
+*/
 framework.emit = function(name) {
 
     var self = this;
@@ -160,7 +188,15 @@ framework.emit = function(name) {
     });
 };
 
-framework.route = function(url, fn, partial) {
+/*
+    Route
+    @url {String}
+    @fn {Function}
+    @partial {String Array} :: optional
+    @once {Boolean} :: optional, default false
+    return {Framework}
+*/
+framework.route = function(url, fn, partial, once) {
 
     var self = this;
     var priority = url.count('/') + (url.indexOf('*') === -1 ? 0 : 10);
@@ -175,7 +211,7 @@ framework.route = function(url, fn, partial) {
         priority -= params.length;
     }
 
-    self.routes.push({ url: route, fn: fn, priority: priority, params: params, partial: partial || [] });
+    self.routes.push({ url: route, fn: fn, priority: priority, params: params, partial: partial || [], once: once, count: 0 });
 
     self.routes.sort(function(a, b) {
         if (a.priority > b.priority)
@@ -296,6 +332,7 @@ framework.location = function(url, isRefresh) {
     var notfound = true;
 
     self.isRefreshed = isRefresh || false;
+    self.count++;
 
     if (!isRefresh) {
         if (self.url.length > 0 && self.history[self.history.length - 1] !== self.url) {
@@ -308,8 +345,14 @@ framework.location = function(url, isRefresh) {
     for (var i = 0; i < self.routes.length; i++) {
         var route = self.routes[i];
         if (self._routeCompare(path, route.url)) {
+
             if (route.url.indexOf('*') === -1)
                 notfound = false;
+
+            if (route.once && route.count > 0)
+                continue;
+
+            route.count++;
             routes.push(route);
         }
     }
@@ -2198,10 +2241,16 @@ if (!Function.prototype.bind) {
     };
 }
 
-if (!Object.prototype.keys)
-    Object.prototype.keys = utils.keys;
+DOM.bind(window, 'popstate', 'popstate', function() {
+    if (framework.count === 1)
+        return;
+    var url = window.location.hash || '';
+    if (url.length === 0)
+        url = window.location.pathname;
+    framework.location(utils.path(url));
+});
 
-DOM.bind(window, 'hashchange', function() {
+DOM.bind(window, 'hashchange', 'hashchange', function() {
     if (!framework.isReady)
         return;
     var url = window.location.hash || '';
@@ -2244,10 +2293,9 @@ DOM.ready(function() {
     if (url.length === 0)
         url = window.location.pathname;
 
-    framework.isReady = true;
-
     if (typeof(framework.events['ready']) === 'undefined')
         framework.location(utils.path(utils.prepareUrl(url)));
     else
         framework.emit('ready', utils.path(utils.prepareUrl(url)));
+
 });
