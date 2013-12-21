@@ -2,6 +2,12 @@
 
 Framework supports HTML 5 History API and for older browsers (IE7, IE8, IE9) is automatically enabled URL hashtag.
 
+__IMPORTANT:__
+
+- [partial.js - web application framework for node.js](https://github.com/petersirka/partial.js)
+- [jQuery two way bindings](https://github.com/petersirka/jquery.bindings)
+- [jQuery templating engine according to partial.js](https://github.com/petersirka/jquery.templates)
+
 ## Properties
 
 #### framework.url;
