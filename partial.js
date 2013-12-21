@@ -63,7 +63,7 @@ var framework = {
     isReady: false,
     isRefresh: false,
     isSkip: false,
-    isSupportHistory: typeof(history.pushState) !== 'undefined',
+    isModernBrowser: typeof(history.pushState) !== 'undefined',
     count: 0
 };
 
@@ -151,6 +151,12 @@ framework.route = function(url, fn, partials, once) {
     var route = self._route(url.trim());
     var params = [];
 
+    if (typeof(partials) === 'boolean') {
+        var tmp = once;
+        once = partials;
+        partials = once;
+    }
+
     if (url.indexOf('{') !== -1) {
 
         for (var i = 0; i < route.length; i++) {
@@ -161,7 +167,7 @@ framework.route = function(url, fn, partials, once) {
         priority -= params.length;
     }
 
-    self.routes.push({ url: route, fn: fn, priority: priority, params: params, partials: partials || [], once: once, count: 0 });
+    self.routes.push({ url: route, fn: fn, priority: priority, params: params, partials: partials || null, once: once, count: 0 });
 
     self.routes.sort(function(a, b) {
         if (a.priority > b.priority)
@@ -377,7 +383,7 @@ framework.status = function(code, message) {
 framework.redirect = function(url, model) {
     var self = this;
 
-    if (!self.isSupportHistory) {
+    if (!self.isModernBrowser) {
         window.location.href = '/#!' + frameworkUtils.path(url);
         self.model = model || null;
         return self;
