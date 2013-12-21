@@ -192,7 +192,7 @@ framework.on('error', function(error, url, description) {
 
 ```js
 framework.on('status', function(code, message) {
-	
+
 	switch (code) {
 		case 404:
 			console.log('NOT FOUND', message);
