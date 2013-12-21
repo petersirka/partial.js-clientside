@@ -54,7 +54,7 @@ var framework = {
     events: {},
     eventsOnce: {},
     global: {},
-    params: {},
+    get: {},
     partials: {},
     repository: {},
     url: '',
@@ -454,7 +454,7 @@ framework._params = function() {
             data[name] = value;
     }
 
-    self.params = data;
+    self.get = data;
     return self;
 };
 

@@ -69,6 +69,14 @@ function view_new_url() {
 }
 ```
 
+#### framework.isReady;
+
+> {Boolean} - Is framework ready??
+
+```js
+console.log(framework.isReady);
+```
+
 #### framework.isRefresh;
 
 > {Boolean} - Is refresh?
@@ -81,13 +89,13 @@ function view() {
 }
 ```
 
-#### framework.params;
+#### framework.get;
 
-> {Object} - Current params from URL address (url -> query). After redirect or refresh are params re-loaded.
+> {Object} - Current (GET) params from URL address (url -> query). After redirect or refresh are params re-loaded.
 
 ```js
 // ---> /current-page/?q=partial.js
-console.log(framework.params.q);
+console.log(framework.get.q);
 ```
 
 ## Methods
@@ -99,6 +107,16 @@ console.log(framework.params.q);
 ```js
 framework.route('/', view_homepage);
 framework.route('/products/{category}/', view_products, ['latest']);
+```
+
+#### framework.partial(name, fn)
+
+> Create a partial content
+
+```js
+framework.partial('latest', function() {
+	console.log('latest products');
+});
 ```
 
 #### framework.redirect(url, [model])
@@ -130,6 +148,17 @@ framework.refresh();
 ```
 
 ## Events
+
+#### framework.on('ready')
+
+> Is framework ready?
+
+```js
+framework.once('ready', funtion() {
+	console.log('I\'m ready');
+	framework.redirect('/homepage/');
+});
+```
 
 #### framework.on('location')
 
