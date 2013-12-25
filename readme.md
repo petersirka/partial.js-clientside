@@ -2,11 +2,17 @@
 
 Framework supports HTML 5 History API and for older browsers (IE7, IE8, IE9) is automatically enabled URL hashtag. Best works with jQuery.
 
-__IMPORTANT:__
+- easy to use
+- minified only 9.5 kB (without GZIP compression)
+- great functionality
+- great use
+- works in IE 7+
 
-- [partial.js - web application framework for node.js](https://github.com/petersirka/partial.js)
+__MUST SEE:__
+
 - [jQuery two way bindings](https://github.com/petersirka/jquery.bindings)
 - [jQuery templating engine according to partial.js](https://github.com/petersirka/jquery.templates)
+- [Web application framework for node.js - partial.js](https://github.com/petersirka/partial.js)
 
 ## Properties
 
