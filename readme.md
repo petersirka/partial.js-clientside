@@ -63,7 +63,7 @@ framework.global.name = 'partial.js';
 
 #### framework.repository;
 
-> {Empty Object} - Temporary object for the current location. After redirect is a repository cleared.
+> {Empty Object} - Temporary object for the current location. After redirecting is the repository object cleared.
 
 ```js
 framework.repository.title = 'partial.js title';
