@@ -16,6 +16,10 @@ __MUST SEE:__
 
 ## Properties
 
+#### framework.isModernBrowser;
+
+> {Boolean} - Supports browser HistoryAPI?
+
 #### framework.url;
 
 > {String} - Current URL address.
