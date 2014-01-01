@@ -620,6 +620,9 @@ DOM.ready(function() {
         url = window.location.pathname;
     if (typeof(framework.events['ready']) === 'undefined')
         framework.location(frameworkUtils.path(frameworkUtils.prepareUrl(url)));
-    else
-        framework.emit('ready', frameworkUtils.path(frameworkUtils.prepareUrl(url)));
+    else {
+        var current = frameworkUtils.path(frameworkUtils.prepareUrl(url));
+        framework.emit('ready', current);
+        framework.emit('load', current);
+    }
 });

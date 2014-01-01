@@ -7,12 +7,74 @@ Framework supports HTML 5 History API and for older browsers (IE7, IE8, IE9) is 
 - great functionality
 - great use
 - works in IE 7+
+- [__DEMO EXAMPLE__](http://source.858project.com/partialjs-clientside.html)
 
 __MUST SEE:__
 
 - [jQuery two way bindings](https://github.com/petersirka/jquery.bindings)
 - [jQuery templating engine according to partial.js](https://github.com/petersirka/jquery.templates)
 - [Web application framework for node.js - partial.js](https://github.com/petersirka/partial.js)
+
+## Simple example
+
+```js
+// ===========================
+// DEFINE ROUTING
+// ===========================
+
+// framework === global variable
+
+framework.route('/homepage/', view_homepage, ['contact']);
+framework.route('/services/', view_services, ['contact']);
+framework.route('/contact/', view_contact, ['empty']);
+
+// ===========================
+// DEFINE PARTIAL CONTENT
+// ===========================
+
+framework.partial('contact', function() {
+    $('#panel').html('CONTACT');
+});
+
+framework.partial('empty', function() {
+    $('#panel').html('EMPTY');
+});
+
+// ===========================
+// DEFINE VIEWS
+// ===========================
+
+function view_homepage() {
+    $('#content').html('&lt;div style=&quot;color:#8CC152&quot;&gt;HOMEPAGE&lt;br /&gt;&lt;b&gt;Look into URL address bar&lt;/b&gt;.&lt;/div&gt;');
+}
+
+function view_services() {
+    $('#content').html('&lt;div style=&quot;color:#3BAFDA&quot;&gt;SERVICES&lt;br /&gt;&lt;b&gt;Look into URL address bar&lt;/b&gt;.&lt;/div&gt;');
+}
+
+function view_contact() {
+    $('#content').html('&lt;div style=&quot;color:#967ADC&quot;&gt;CONTACT&lt;br /&gt;&lt;b&gt;Look into URL address bar&lt;/b&gt;.&lt;/div&gt;');
+}
+
+// ===========================
+// DEFINE EVENTS
+// ===========================
+
+framework.on('ready', function() {
+    $('.menu').on('click', 'a', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        framework.redirect($(this).attr('href'));
+    });
+    framework.redirect('/homepage/');
+});
+
+framework.on('location', function(url) {
+     var menu = $('.menu');
+     menu.find('.selected').removeClass('selected');
+     menu.find('a[href="' + url + '"]').parent().addClass('selected');
+});
+```
 
 ## Properties
 
