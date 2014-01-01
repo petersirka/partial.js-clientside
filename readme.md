@@ -6,7 +6,7 @@ Framework supports HTML 5 History API and for older browsers (IE7, IE8, IE9) is 
 - minified only 9.5 kB (without GZIP compression)
 - great functionality
 - great use
-- works in IE 7+
+- works in IE 8+
 - [__DEMO EXAMPLE__](http://source.858project.com/partialjs-clientside.html)
 
 __MUST SEE:__
