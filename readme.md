@@ -27,17 +27,22 @@ __MUST SEE:__
 framework.route('/homepage/', view_homepage, ['contact']);
 framework.route('/services/', view_services, ['contact']);
 framework.route('/contact/', view_contact, ['empty']);
+framework.route('/products/{category}/', view_products, ['latest']);
 
 // ===========================
 // DEFINE PARTIAL CONTENT
 // ===========================
 
 framework.partial('contact', function() {
-    $('#panel').html('CONTACT');
+    $('#panel').html('PANEL CONTACT');
 });
 
 framework.partial('empty', function() {
-    $('#panel').html('EMPTY');
+    $('#panel').html('PANEL EMPTY');
+});
+
+framework.partial('latest', function() {
+    $('#panel').html('PANEL LATEST');
 });
 
 // ===========================
@@ -45,15 +50,19 @@ framework.partial('empty', function() {
 // ===========================
 
 function view_homepage() {
-    $('#content').html('&lt;div style=&quot;color:#8CC152&quot;&gt;HOMEPAGE&lt;br /&gt;&lt;b&gt;Look into URL address bar&lt;/b&gt;.&lt;/div&gt;');
+    $('#content').html('HOMEPAGE');
 }
 
 function view_services() {
-    $('#content').html('&lt;div style=&quot;color:#3BAFDA&quot;&gt;SERVICES&lt;br /&gt;&lt;b&gt;Look into URL address bar&lt;/b&gt;.&lt;/div&gt;');
+    $('#content').html('SERVICES');
 }
 
 function view_contact() {
-    $('#content').html('&lt;div style=&quot;color:#967ADC&quot;&gt;CONTACT&lt;br /&gt;&lt;b&gt;Look into URL address bar&lt;/b&gt;.&lt;/div&gt;');
+    $('#content').html('CONTACT');
+}
+
+function view_products(category) {
+	$('#content').html('PRODUCTS –> ' + category);
 }
 
 // ===========================
