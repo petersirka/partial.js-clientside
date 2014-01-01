@@ -38,10 +38,14 @@ DOM.bind = function(el, type, name, fn) {
 
     frameworkHandlers[name] = fn;
 
-    if (el.addEventListener)
+    if (el.addEventListener) {
         el.addEventListener(type, frameworkHandlers[name].bind(el), false);
-    else
-        el.attachEvent('on' + type, frameworkHandlers[name].bind(el));
+        return el;
+    }
+
+    el.attachEvent('on' + type, function() {
+        frameworkHandlers[name].apply(el, arguments);
+    });
 
     return el;
 };
@@ -304,7 +308,7 @@ framework.location = function(url, isRefresh) {
 
     var length = self.routes.length;
     for (var i = 0; i < length; i++) {
-        
+
         var route = self.routes[i];
         if (!self._route_compare(path, route.url))
             continue;
@@ -350,7 +354,7 @@ framework.location = function(url, isRefresh) {
 
         try
         {
-            route.fn.apply(self, self._route_param(path, route));            
+            route.fn.apply(self, self._route_param(path, route));
         } catch (ex) {
             isError = true;
             error.push(ex);
@@ -384,7 +388,7 @@ framework.redirect = function(url, model) {
     var self = this;
 
     if (!self.isModernBrowser) {
-        window.location.href = '/#!' + frameworkUtils.path(url);
+        window.location.href = '#!' + frameworkUtils.path(url);
         self.model = model || null;
         return self;
     }
@@ -512,7 +516,7 @@ if (!Array.prototype.indexOf) {
 }
 
 DOM.bind(window, 'popstate', 'popstate', function() {
-    
+
     if (framework.count === 1 || framework.isSkip) {
         framework.isSkip = false;
         return;
@@ -533,8 +537,9 @@ DOM.bind(window, 'hashchange', 'hashchange', function() {
     framework.location(frameworkUtils.path(url));
 });
 
-if (navigator.appVersion.indexOf('MSIE 7.') !== -1) {
+if (navigator.appVersion.match(/MSIE.7|MSIE.8/) !== null) {
     setInterval(function() {
+
         if (!framework.isReady)
             return;
 
@@ -618,6 +623,7 @@ DOM.ready(function() {
     var url = window.location.hash || '';
     if (url.length === 0)
         url = window.location.pathname;
+    framework.isReady = true;
     if (typeof(framework.events['ready']) === 'undefined')
         framework.location(frameworkUtils.path(frameworkUtils.prepareUrl(url)));
     else {
