@@ -1,13 +1,13 @@
 # partial.js client-side routing
 
-Framework supports HTML 5 History API and for older browsers (IE8+) is automatically enabled URL hashtag. __This plugin is a little big cannon for the web development__. Best works with jQuery.
+Framework supports the HTML 5 History API, for older browsers (IE8+) URL hashtag is automatically enabled. __This plugin is a little big cannon for the web development__. Works best with jQuery.
 
 - easy to use
 - minified only 9.5 kB (without GZIP compression)
 - great functionality
 - great use
 - works in IE 8+
-- without dependencies
+- no dependencies
 - [__DEMO EXAMPLE__](http://source.858project.com/partialjs-clientside.html)
 
 __MUST SEE:__
